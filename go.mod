@@ -1,3 +1,3 @@
-module github.com/Arya-f4/worldshellfinder
+module github.com/Aryma-f4/worldshellfinder
 
 go 1.23

@@ -1,5 +1,5 @@
-# Contributing to Arya-f4/Worldshellfinder
-We appreciate your interest in contributing to the Arya-f4/Worldshellfinder! This document provides some basic guidelines for contributors.
+# Contributing to Aryma-f4/Worldshellfinder
+We appreciate your interest in contributing to the Aryma-f4/Worldshellfinder! This document provides some basic guidelines for contributors.
 
 ## Getting Started
 Always base your work from the dev branch, which is the development branch with the latest code.
