@@ -21,12 +21,14 @@ func RunDeepScan(directory, wordlistPath, outputFile string, minScore, maxEviden
 	fileSummary, err := ScanDirectory(directory, cfg, verbose, numWorkers)
 	if err != nil {
 		done <- true
+		fmt.Print("\rOperation complete!                          \n")
 		return err
 	}
 	trafficFindings, trafficWarnings := RunTrafficScan()
 	logFindings, logWarnings := RunLogScan()
 	rootkitFindings, rootkitWarnings := RunRootkitScan()
 	done <- true
+	fmt.Print("\rOperation complete!                          \n")
 
 	warnings := append([]string{}, trafficWarnings...)
 	for _, warning := range logWarnings {

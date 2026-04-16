@@ -4,15 +4,29 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
+
+	"github.com/pterm/pterm"
 )
 
-var cache = make(map[string]VTResult)
+var (
+	cache    = make(map[string]VTResult)
+	cacheMut sync.RWMutex
+	
+	// Rate limiting state
+	lastRequestTime time.Time
+	requestMut      sync.Mutex
+	
+	// API Limits (Free Tier)
+	requestsPerMinute = 4
+	minRequestDelay   = time.Minute / time.Duration(requestsPerMinute)
+)
 
 type VTResult struct {
-	Malicious int
+	Malicious  int
 	Undetected int
-	Queried   bool
+	Queried    bool
 }
 
 type VTResponse struct {
@@ -34,9 +48,26 @@ func CheckHash(apiKey, hash string) (VTResult, error) {
 		return VTResult{}, nil
 	}
 
+	// Check cache first
+	cacheMut.RLock()
 	if res, ok := cache[hash]; ok {
+		cacheMut.RUnlock()
 		return res, nil
 	}
+	cacheMut.RUnlock()
+
+	// Rate limiting: Ensure we don't exceed 4 requests per minute
+	requestMut.Lock()
+	now := time.Now()
+	timeSinceLastRequest := now.Sub(lastRequestTime)
+	
+	if timeSinceLastRequest < minRequestDelay {
+		waitTime := minRequestDelay - timeSinceLastRequest
+		pterm.Warning.Printf("VirusTotal API rate limit (4/min). Waiting %v before next request...\n", waitTime.Round(time.Second))
+		time.Sleep(waitTime)
+	}
+	lastRequestTime = time.Now()
+	requestMut.Unlock()
 
 	url := fmt.Sprintf("https://www.virustotal.com/api/v3/files/%s", hash)
 	req, err := http.NewRequest("GET", url, nil)
@@ -54,8 +85,15 @@ func CheckHash(apiKey, hash string) (VTResult, error) {
 
 	if resp.StatusCode == http.StatusNotFound {
 		res := VTResult{Queried: true}
+		cacheMut.Lock()
 		cache[hash] = res
+		cacheMut.Unlock()
 		return res, nil
+	}
+	
+	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == 429 {
+		pterm.Error.Println("VirusTotal API daily/monthly quota exceeded or rate limited. Skipping further VT checks for now.")
+		return VTResult{}, fmt.Errorf("virustotal api quota exceeded (429)")
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -76,6 +114,10 @@ func CheckHash(apiKey, hash string) (VTResult, error) {
 		Undetected: vtResp.Data.Attributes.LastAnalysisStats.Undetected,
 		Queried:    true,
 	}
+	
+	cacheMut.Lock()
 	cache[hash] = res
+	cacheMut.Unlock()
+	
 	return res, nil
 }

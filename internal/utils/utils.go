@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/Aryma-f4/worldshellfinder/internal/config"
@@ -15,9 +16,19 @@ import (
 )
 
 func LoadingAnimation(done chan bool) {
-	spinner, _ := pterm.DefaultSpinner.Start("Processing...")
-	<-done
-	spinner.Success("Operation complete!")
+	// Simple animation to not conflict with stdout printing
+	chars := []rune{'|', '/', '-', '\\'}
+	for {
+		select {
+		case <-done:
+			return
+		default:
+			for _, c := range chars {
+				fmt.Printf("\rProcessing... %c", c)
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+	}
 }
 
 func IsPermissionIssue(err error) bool {

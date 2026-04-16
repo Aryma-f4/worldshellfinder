@@ -27,6 +27,7 @@ This project is intended for educational, incident response, and defensive secur
 - Beautiful, intuitive **Interactive UI** powered by `pterm`.
 - Integrates **VirusTotal API** as a malware reference database to improve detection rules and confirm suspicious files.
 - Lightning fast **multi-threading support** via Goroutines and Worker Pools for massive directory scanning.
+- **Dynamic output streaming**, immediately reports potential threats to your terminal without waiting for the scan to finish.
 - Detects suspicious files using a scoring-based engine.
 - Combines keyword matches, regex signatures, and heuristic indicators.
 - Supports custom wordlists on top of the embedded default wordlist.

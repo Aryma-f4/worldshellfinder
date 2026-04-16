@@ -133,6 +133,7 @@ func RunRemoval(directory, outputFile string, reader *bufio.Reader, removeValue 
 	wg.Wait()
 
 	done <- true
+	fmt.Print("\rOperation complete!                          \n")
 	if err != nil {
 		return err
 	}

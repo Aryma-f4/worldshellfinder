@@ -170,6 +170,7 @@ func ScanDirectory(directory string, cfg models.ScanConfig, verbose bool, numWor
 					continue
 				}
 				if detection != nil {
+					reporter.PrintSingleDetection(detection, verbose)
 					mu.Lock()
 					detections = append(detections, detection)
 					mu.Unlock()
@@ -326,8 +327,8 @@ func analyzeReader(filename string, reader io.Reader, cfg models.ScanConfig) (*m
 
 	score, evidences = addHeuristicEvidence(score, evidences, indicators, seen)
 
-	// VirusTotal Integration
-	if cfg.VTApiKey != "" && score > 0 {
+	// VirusTotal Integration - ONLY query if file is highly suspicious
+	if cfg.VTApiKey != "" && score >= 8 {
 		hash := getFileHash(filename)
 		if hash != "" {
 			vtRes, err := virustotal.CheckHash(cfg.VTApiKey, hash)
@@ -340,6 +341,9 @@ func analyzeReader(filename string, reader io.Reader, cfg models.ScanConfig) (*m
 					LineNumber: 0,
 					Matched:    "File hash found in VirusTotal malware database",
 				})
+			} else if err != nil && strings.Contains(err.Error(), "429") {
+				// API Quota exceeded, disable VT checks for remainder of the scan
+				cfg.VTApiKey = "" 
 			}
 		}
 	}
@@ -462,6 +466,7 @@ func RunDetection(directory, wordlistPath, outputFile string, minScore, maxEvide
 	go utils.LoadingAnimation(done)
 	summary, err := ScanDirectory(directory, cfg, verbose, numWorkers)
 	done <- true
+	fmt.Print("\rOperation complete!                          \n")
 	if err != nil {
 		return err
 	}

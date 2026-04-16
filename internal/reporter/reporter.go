@@ -11,6 +11,23 @@ import (
 	"github.com/pterm/pterm"
 )
 
+func PrintSingleDetection(detect *models.ShellDetection, verbose bool) {
+	fmt.Print("\r") // clear the loading animation line
+	pterm.Warning.Printf("- File: %s\n", detect.Path)
+	pterm.Warning.Printf("  Suspicion score: %d\n", detect.Score)
+	for _, evidence := range detect.Evidences {
+		if evidence.LineNumber > 0 {
+			fmt.Printf("  Evidence [%s] line %d (+%d): %s\n", evidence.Kind, evidence.LineNumber, evidence.Weight, evidence.Name)
+		} else {
+			fmt.Printf("  Evidence [%s] (+%d): %s\n", evidence.Kind, evidence.Weight, evidence.Name)
+		}
+		if verbose && evidence.Matched != "" {
+			fmt.Printf("    -> %s\n", evidence.Matched)
+		}
+	}
+	fmt.Println()
+}
+
 func PrintDetectionSummary(summary *models.ScanSummary, verbose bool) {
 	pterm.DefaultSection.Println("WebShell Detection Summary")
 	pterm.Info.Printf("Total files scanned: %d\n", summary.TotalFilesScanned)
@@ -19,22 +36,6 @@ func PrintDetectionSummary(summary *models.ScanSummary, verbose bool) {
 	if len(summary.Detections) == 0 {
 		pterm.Success.Println("No potential webshells were found.")
 		return
-	}
-
-	pterm.Error.Println("Potential WebShells Found:")
-	for _, detect := range summary.Detections {
-		pterm.Warning.Printf("\n- File: %s\n", detect.Path)
-		pterm.Warning.Printf("  Suspicion score: %d\n", detect.Score)
-		for _, evidence := range detect.Evidences {
-			if evidence.LineNumber > 0 {
-				fmt.Printf("  Evidence [%s] line %d (+%d): %s\n", evidence.Kind, evidence.LineNumber, evidence.Weight, evidence.Name)
-			} else {
-				fmt.Printf("  Evidence [%s] (+%d): %s\n", evidence.Kind, evidence.Weight, evidence.Name)
-			}
-			if verbose && evidence.Matched != "" {
-				fmt.Printf("    -> %s\n", evidence.Matched)
-			}
-		}
 	}
 }
 
