@@ -65,8 +65,8 @@ graph TD
     B -->|Detect / Deep| C[Load Config & Wordlists]
     B -->|Remove| D[Load String to Remove]
 
-    C --> E[Initialize Worker Pool (-workers)]
-    D --> ER[Initialize Worker Pool (-workers)]
+    C --> E["Initialize Worker Pool (-workers)"]
+    D --> ER["Initialize Worker Pool (-workers)"]
     
     subgraph Multi-Threaded Scanning
         E --> F[Walk Directory]
@@ -87,7 +87,7 @@ graph TD
     I -->|Unknown Extension| K{Looks Like Text?}
     K -->|Yes| J
     K -->|No| K2{Executable or Known Binary Format?}
-    K2 -->|Yes| JB[Analyze as Binary (strings)]
+    K2 -->|Yes| JB["Analyze as Binary (strings)"]
     K2 -->|No| L[Skip File]
 
     J --> M[Match Keywords & Rules]
@@ -100,7 +100,7 @@ graph TD
     O -->|Yes| P[Calculate SHA256 Hash]
     P --> Q{Check Local Cache}
     Q -->|Found| R[Apply Cached VT Result]
-    Q -->|Not Found| S[Rate Limited Request to VirusTotal API (auto-disable on 429)]
+    Q -->|Not Found| S["Rate Limited Request to VirusTotal API (auto-disable on 429)"]
     S --> R
     R --> T{Is Malicious?}
     T -->|Yes| U[Add +10 Score]
@@ -110,7 +110,7 @@ graph TD
     U --> W
     V --> W{Score >= Min Threshold?}
     
-    W -->|Yes| X[Print Alert Immediately (stream)]
+    W -->|Yes| X["Print Alert Immediately (stream)"]
     W -->|No| L
     
     X --> Y[Store in Results]
