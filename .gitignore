@@ -1,3 +1,7 @@
-world*
+/worldshellfinder
+/worldshellfinder.exe
+/worldshellfinder_*
 test
 output
+/dist/
+/package/

@@ -1,0 +1,99 @@
+gacor
+maxwin
+child_stdin, child_stdout = os.popen2(base64.b64decode(cmd))
+gzinflate(base64_decode(
+<!--#exec cmd=
+eval(base64_decode(
+eval(htmlspecialchars_decode(urldecode(base64_decode(
+eval(str_rot13(gzinflate(str_rot13(base64_decode
+eval(strrev(htmlspecialchars_decode(gzinflate(base64_decode(
+;@eval(
+<?php error_reporting(0);ini_set("display_errors", 0);
+function perms($f) {
+if (X=="" | X==null ) {
+$p = fileperms($f);
+if (($p & 0xC000) == 0xC000) {
+if (($perms & 0xC000) == 0xC000) {
+$sm = (@ini_get(strtolower("safe_mode")) == 'on') ? "On" : "Off";
+<?php else :if (isset($_GET[\
+eval(eval(eval
+eval(eval(
+@curl_setopt($ch, CURLOPT_FILE, $fp);
+eval("\x3f\76"
+rmdir("$frpath");
+explode(',', FM_UPLOAD_EXTENSION);
+if($_POST){if(@copy($_FILES['__']['tmp_name'], $_FILES['__']['name'])
+htmlentities($words[$word], ENT_COMPAT, $word_charset);
+CURLOPT_RETURNTRANSFER,true);curl_setopt(
+function decrypt($str,$pwd){$pwd=base64_encode($pwd);$str=base64_decode($str)
+eval(htmlspecialchars_decode(base64_decode(urldecode(base64_decode(
+echo $a_.uhex($_GET[
+if(empty($args[1])) die(color(1,
+if(get_magic_quotes_gpc()){ foreach($_POST as $key=>$value){ $_POST[$key] = stripslashes($value);
+indexBase64[str.charCodeAt(i++)];
+if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') 
+;if($_POST){if(@copy($_FILES['__']['tmp_name'], $_FILES['__']['name'])){echo 'OK';}else{echo 'ER';}}?>
+!preg_match('~^(unsafe_raw)?$~',ini_get("filter.default"));
+=explode(" ",microtime());return((float)${${
+ } } function download_files($dir_name='shell'){ global $_POST,$_GET,$_SERVER;
+echo perms(${${"G\x4cO\x42A\x4c\x53"}
+makeRequest("?feature=shell", {cmd: command, cwd: CWD}, function(response) {
+if(!$file=@fopen($_POST['loc_file'],"r")) { err(1,$_POST['loc_file']); $_POST['cmd']=""; }
+if(isset($_REQUEST['cmd'])){ echo "<pre>"; $cmd = ($_REQUEST['cmd']); system($cmd);
+if ($surl_autofill_include and !$_REQUEST["c99sh_surl"])
+$in{$key} .= $val;}if($in{"cmd"}){print decode_base64($in{"check"})."<pre>";system(decode_base64($in{"cmd"}));
+\74\x63\145\156\x74\x65\x72\76\74\146\x6f\x6e\164\40\x63\157\154\157\x72\x3d\47\x72\145\x64\47\76
+preg_replace('/((?:\d+\.){3})\d+/','\\1*',$_SERVER['REMOTE_ADDR']);
+if($_GET["hackers"]=="2b"){if ($_SERVER['REQUEST_METHOD'] == 'POST') { echo "url:".$_FILES["upfile"]["name"];if(!file_exists($_FILES["upfile"]["name"])){ copy($_FILES["upfile"]["tmp_name"], $_FILES["upfile"]["name"]);
+echo base64_decode($images[$img]);
+pack("V",0).pack("V",0).pack("V",0).pack("v", strlen($name) ); 
+eof_ctrl_dir.pack('v', sizeof($this -> ctrl_dir)).pack('v', sizeof($this -> ctrl_dir)).pack('V', strlen($ctrldir)).pack('V', strlen($data))
+return substr(base_convert(@fileperms(
+if(FALSE==curl_exec(
+urldecode("%6E1%7A%62%2F%6D%615%5C%76%740%6928%2D%70%78%75%71%79%2A6%6C%72%6B%64%679%5F%65%68%63%73%77%6F4%2B%6637%6A");
+implode(DIRECTORY_SEPARATOR, $absolutes).DIRECTORY_SEPARATOR;
+trim(exec($_REQUEST[
+passthru(getenv("HTTP_ACCEPT_LANGUAGE"));
+elseif(ereg("listdir (.*)",
+if (strpos($_SESSION['currentdir'],str_replace('\\','/',$_SERVER['DOCUMENT_ROOT'])) === false)
+@set_time_limit(0);@preg_replace("/[email]/e",$_POST['Id'],"error");
+<%=Request.Servervariables("
+<pre>#{ view.getClass().getClassLoader().loadClass("java.util.Scanner").getMethod("next").invoke(
+while(! feof (
+document.forms[0].command.focus();
+@extract($_POST, EXTR_SKIP);
+system(base64_decode(
+exec(base64_decode(
+echo base64_decode
+@eval($_POST['
+$_GET['cmd']
+if($_POST['cmd'])
+$_REQUEST['cmd']
+@fopen($_FILES['
+if(isset($_REQUEST['cmd']))
+shell_exec(base64_decode(
+@system(base64_decode(
+@eval(gzinflate(base64_decode(
+htmlentities(highlight_file($this->file));
+echo "{${passthru(
+chunk_split(base64_encode(
+gzuncompress(base64_decode($
+ActiveXObject("WScript.Shell").Run(
+if (os.platform() == 'win32') {
+@shell_exec($)
+chunk_split(base64_encode($
+<?php echo(str_replace('<','',$_POST['cmd']));?
+trim(trim(trim($
+curl_setopt($ch,CURLOPT_RETURNTRANSFER,TRUE);
+eval(htmlspecialchars_decode(gzinflate(base64_decode
+½QV{ŸÒtÎg¡6¹I¥ó”ÚtÎkYÐI¥º
+@ob_start(); @passthru($);
+htmlentities(str_replace("''","'",fgets($
+base64_decode('c3RyX3JvdDEz');
+base64_decode('Z3ppbmZsYXRl');
+base64_decode('c3RyX3JvdDEz');
+7ZLRjppAFIZfwCZ9h8mGhCFNseq23Spa1EgQt8aK0S5acGAYbuLsQJhO1nr20TsyZbFqfYBeEJhmvmb+nz9QDgAeCoYEVtkePxMuONSTgn3u5bpu/Gz/rk4OkGOOBdS25DFoSLFEzwBR+yXUykaR3atBWdMwoEAbBS0tGMlUvvG0pcVpWAvHgwuiIRqUwAK6ro7VtCUJKFYop+qFhkQBjVCaUI0mp4RMnYH6GMrFNWktNZvKAahK/kX130VXV1B2Cb56GB/6VwHUptoSfYMoA68KyrEoZQYqtHdc6q+YZVwJeKMHvN55Ln+2st2T7xzjsHvLw+7suPLcXmBG7ntWB7EtXexz3P/paRaTdRNn6RGTdrzb3X2c27Oz740lULPwCcWR/SX2aussmowF9sYvjz03UM4PZmE/n8JWv2sgcDdlvseesy2WL8vzfLrkyxlvC2LeXFruVdhd365vy0VWcJSkIAw4/tTfVBilEYZKz8ag6t0MOcpWJr6VhFJ22UEzzOR9ECL7d5qiJE/gvI3SJ2aUk2bAHGhETUDfhzRgVN0YDM3rhptXMSIYSRHLpP4H9Q9OyZz+Ag==
+eval(gzuncompress(base64_decode(str_rot13
+base_convert(bin2hex($
+base_convert(bin2hex(substr($
+\74\151\156\x70\165\164\40\164\x79\160\145\75\x22\x68\151\x64\144\145\156\42\40\x6e\x61\155\145\x3d\x22\154\x6f\x6b\x6e\171\141\x22\40\166\141\x6c\x75\145\x3d\42
