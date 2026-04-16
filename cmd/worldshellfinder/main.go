@@ -21,6 +21,31 @@ var defaultWordlist embed.FS
 
 var verbose bool
 
+func readDirectoryListFile(path string) ([]string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var directories []string
+	s := bufio.NewScanner(file)
+	for s.Scan() {
+		line := strings.TrimSpace(s.Text())
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		directories = append(directories, line)
+	}
+	if err := s.Err(); err != nil {
+		return nil, err
+	}
+	return directories, nil
+}
+
 func main() {
 	helpFlag := flag.Bool("h", false, "display help information")
 	helpFlagLong := flag.Bool("help", false, "display help information")
@@ -28,6 +53,7 @@ func main() {
 	verboseFlag := flag.Bool("v", false, "enable verbose mode")
 	modeFlag := flag.String("mode", "", "operation mode: detect, deep, or remove")
 	dirFlag := flag.String("dir", "", "directory to scan")
+	dirListFlag := flag.String("dir-list", "", "file containing a list of directories to scan (one per line)")
 	outFlag := flag.String("out", "", "output file path")
 	wordlistFlag := flag.String("wordlist", "", "custom wordlist path")
 	minScoreFlag := flag.Int("min-score", config.DefaultMinScore, "minimum score before reporting a file")
@@ -64,25 +90,37 @@ func main() {
 	reader := bufio.NewReader(os.Stdin)
 	mode := strings.TrimSpace(strings.ToLower(*modeFlag))
 	directory := strings.TrimSpace(*dirFlag)
+	dirListPath := strings.TrimSpace(*dirListFlag)
 	outputFile := strings.TrimSpace(*outFlag)
 	vtApiKey := strings.TrimSpace(*vtApiKeyFlag)
 	wordlistPath := strings.TrimSpace(*wordlistFlag)
 
 	if mode != "" {
-		if directory == "" {
-			pterm.Fatal.Println("dir is required when mode is provided")
+		var directories []string
+		if dirListPath != "" {
+			paths, err := readDirectoryListFile(dirListPath)
+			if err != nil {
+				pterm.Fatal.Printf("Failed reading dir-list file: %v\n", err)
+			}
+			directories = append(directories, paths...)
+		}
+		if directory != "" {
+			directories = append(directories, directory)
+		}
+		if len(directories) == 0 {
+			pterm.Fatal.Println("dir or dir-list is required when mode is provided")
 		}
 		switch mode {
 		case "detect":
-			if err := scanner.RunDetection(directory, wordlistPath, outputFile, *minScoreFlag, *maxEvidenceFlag, vtApiKey, verbose, defaultWordlist, *workersFlag); err != nil {
+			if err := scanner.RunDetection(directories, wordlistPath, outputFile, *minScoreFlag, *maxEvidenceFlag, vtApiKey, verbose, defaultWordlist, *workersFlag); err != nil {
 				pterm.Fatal.Printf("Detection failed: %v\n", err)
 			}
 		case "deep":
-			if err := scanner.RunDeepScan(directory, wordlistPath, outputFile, *minScoreFlag, *maxEvidenceFlag, vtApiKey, verbose, defaultWordlist, *workersFlag); err != nil {
+			if err := scanner.RunDeepScan(directories, wordlistPath, outputFile, *minScoreFlag, *maxEvidenceFlag, vtApiKey, verbose, defaultWordlist, *workersFlag); err != nil {
 				pterm.Fatal.Printf("Deep scan failed: %v\n", err)
 			}
 		case "remove":
-			if err := remover.RunRemoval(directory, outputFile, reader, *removeStringFlag, verbose, *workersFlag); err != nil {
+			if err := remover.RunRemoval(directories, outputFile, reader, *removeStringFlag, verbose, *workersFlag); err != nil {
 				pterm.Fatal.Printf("String removal failed: %v\n", err)
 			}
 		default:
@@ -124,12 +162,12 @@ func main() {
 			vtApiKey, _ = pterm.DefaultInteractiveTextInput.Show("Enter VirusTotal API Key (press Enter to skip)")
 			vtApiKey = strings.TrimSpace(vtApiKey)
 		}
-		err := scanner.RunDetection(directory, wordlistPath, outputFile, *minScoreFlag, *maxEvidenceFlag, vtApiKey, verbose, defaultWordlist, *workersFlag)
+		err := scanner.RunDetection([]string{directory}, wordlistPath, outputFile, *minScoreFlag, *maxEvidenceFlag, vtApiKey, verbose, defaultWordlist, *workersFlag)
 		if err != nil {
 			pterm.Fatal.Printf("Detection failed: %v\n", err)
 		}
 	case "2. Remove String from Files":
-		err := remover.RunRemoval(directory, outputFile, reader, *removeStringFlag, verbose, *workersFlag)
+		err := remover.RunRemoval([]string{directory}, outputFile, reader, *removeStringFlag, verbose, *workersFlag)
 		if err != nil {
 			pterm.Fatal.Printf("String removal failed: %v\n", err)
 		}
@@ -142,7 +180,7 @@ func main() {
 			vtApiKey, _ = pterm.DefaultInteractiveTextInput.Show("Enter VirusTotal API Key (press Enter to skip)")
 			vtApiKey = strings.TrimSpace(vtApiKey)
 		}
-		err := scanner.RunDeepScan(directory, wordlistPath, outputFile, *minScoreFlag, *maxEvidenceFlag, vtApiKey, verbose, defaultWordlist, *workersFlag)
+		err := scanner.RunDeepScan([]string{directory}, wordlistPath, outputFile, *minScoreFlag, *maxEvidenceFlag, vtApiKey, verbose, defaultWordlist, *workersFlag)
 		if err != nil {
 			pterm.Fatal.Printf("Deep scan failed: %v\n", err)
 		}
@@ -154,8 +192,11 @@ func main() {
 func printHelp() {
 	fmt.Println("Usage:")
 	fmt.Println("  worldshellfinder -mode detect -dir <directory> [options]")
+	fmt.Println("  worldshellfinder -mode detect -dir-list <file> [options]")
 	fmt.Println("  worldshellfinder -mode deep -dir <directory> [options]")
+	fmt.Println("  worldshellfinder -mode deep -dir-list <file> [options]")
 	fmt.Println("  worldshellfinder -mode remove -dir <directory> -remove-string <value> [options]")
+	fmt.Println("  worldshellfinder -mode remove -dir-list <file> -remove-string <value> [options]")
 	fmt.Println("  worldshellfinder")
 	fmt.Println()
 	fmt.Println("Options:")
@@ -163,6 +204,7 @@ func printHelp() {
 	fmt.Println("  -v                      Enable verbose output")
 	fmt.Println("  -mode string            Operation mode: detect, deep, or remove")
 	fmt.Println("  -dir string             Directory to scan")
+	fmt.Println("  -dir-list string        File containing a list of directories to scan (one per line)")
 	fmt.Println("  -out string             Output file path")
 	fmt.Println("  -wordlist string        Additional custom wordlist file")
 	fmt.Println("  -min-score int          Minimum score before a file is reported (default: 4)")

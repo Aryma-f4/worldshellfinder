@@ -117,26 +117,33 @@ func RunRemoval(directories []string, outputFile string, reader *bufio.Reader, r
 		}()
 	}
 
-	err := filepath.Walk(directory, func(path string, info os.FileInfo, walkErr error) error {
-		if walkErr != nil {
-			utils.LogWalkIssue(path, walkErr)
-			return nil
+	for _, directory := range directories {
+		directory = strings.TrimSpace(directory)
+		if directory == "" {
+			continue
 		}
-		if info.IsDir() {
+		err := filepath.Walk(directory, func(path string, info os.FileInfo, walkErr error) error {
+			if walkErr != nil {
+				utils.LogWalkIssue(path, walkErr)
+				return nil
+			}
+			if info.IsDir() {
+				return nil
+			}
+			fileChan <- path
 			return nil
+		})
+		if err != nil {
+			utils.LogWalkIssue(directory, err)
+			continue
 		}
-		fileChan <- path
-		return nil
-	})
+	}
 
 	close(fileChan)
 	wg.Wait()
 
 	done <- true
 	fmt.Print("\rOperation complete!                          \n")
-	if err != nil {
-		return err
-	}
 
 	pterm.DefaultSection.Println("String Removal Summary")
 	pterm.Info.Printf("Total files scanned: %d\n", totalFilesScanned)

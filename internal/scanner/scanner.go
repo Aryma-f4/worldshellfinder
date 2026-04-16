@@ -182,25 +182,31 @@ func ScanDirectories(directories []string, cfg models.ScanConfig, verbose bool, 
 		}()
 	}
 
-	err := filepath.Walk(directory, func(path string, info os.FileInfo, walkErr error) error {
-		if walkErr != nil {
-			utils.LogWalkIssue(path, walkErr)
-			return nil
+	for _, directory := range directories {
+		directory = strings.TrimSpace(directory)
+		if directory == "" {
+			continue
 		}
-		if info.IsDir() {
-			return nil
-		}
+		err := filepath.Walk(directory, func(path string, info os.FileInfo, walkErr error) error {
+			if walkErr != nil {
+				utils.LogWalkIssue(path, walkErr)
+				return nil
+			}
+			if info.IsDir() {
+				return nil
+			}
 
-		fileChan <- path
-		return nil
-	})
+			fileChan <- path
+			return nil
+		})
+		if err != nil {
+			utils.LogWalkIssue(directory, err)
+			continue
+		}
+	}
 
 	close(fileChan)
 	wg.Wait()
-
-	if err != nil {
-		return nil, err
-	}
 
 	sort.Slice(detections, func(i, j int) bool {
 		if detections[i].Score == detections[j].Score {
