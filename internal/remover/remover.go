@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"sync"
+	"sync/atomic"
+
 	"github.com/Aryma-f4/worldshellfinder/internal/models"
 	"github.com/Aryma-f4/worldshellfinder/internal/reporter"
 	"github.com/Aryma-f4/worldshellfinder/internal/utils"
@@ -40,7 +43,7 @@ func removeStringFromFile(filePath string, stringToRemove string) (*models.FileM
 	}, nil
 }
 
-func RunRemoval(directory, outputFile string, reader *bufio.Reader, removeValue string, verbose bool) error {
+func RunRemoval(directory, outputFile string, reader *bufio.Reader, removeValue string, verbose bool, numWorkers int) error {
 	stringToRemove := strings.TrimSpace(removeValue)
 	if stringToRemove == "" {
 		pterm.Info.Println("Enter string to remove (press Ctrl+D or Ctrl+Z when done):")
@@ -76,11 +79,43 @@ func RunRemoval(directory, outputFile string, reader *bufio.Reader, removeValue 
 	fmt.Printf("String size to remove: %.2f MB\n", float64(len(stringToRemove))/(1024*1024))
 
 	var modifications []*models.FileModification
-	totalFilesScanned := 0
-	totalStringsRemoved := 0
+	var totalFilesScanned int32
+	var totalStringsRemoved int32
+	var mu sync.Mutex
 
 	done := make(chan bool)
 	go utils.LoadingAnimation(done)
+
+	fileChan := make(chan string, 1000)
+	var wg sync.WaitGroup
+
+	if numWorkers <= 0 {
+		numWorkers = 1
+	}
+
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for path := range fileChan {
+				atomic.AddInt32(&totalFilesScanned, 1)
+				modification, err := removeStringFromFile(path, stringToRemove)
+				if err != nil {
+					utils.LogReadIssue(path, err)
+					continue
+				}
+				if modification != nil {
+					mu.Lock()
+					modifications = append(modifications, modification)
+					mu.Unlock()
+					atomic.AddInt32(&totalStringsRemoved, int32(modification.StringsRemoved))
+				}
+				if verbose {
+					pterm.Info.Printf("Processed file: %s\n", path)
+				}
+			}
+		}()
+	}
 
 	err := filepath.Walk(directory, func(path string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil {
@@ -90,22 +125,12 @@ func RunRemoval(directory, outputFile string, reader *bufio.Reader, removeValue 
 		if info.IsDir() {
 			return nil
 		}
-
-		totalFilesScanned++
-		modification, err := removeStringFromFile(path, stringToRemove)
-		if err != nil {
-			utils.LogReadIssue(path, err)
-			return nil
-		}
-		if modification != nil {
-			modifications = append(modifications, modification)
-			totalStringsRemoved += modification.StringsRemoved
-		}
-		if verbose {
-			pterm.Info.Printf("Processed file: %s\n", path)
-		}
+		fileChan <- path
 		return nil
 	})
+	
+	close(fileChan)
+	wg.Wait()
 
 	done <- true
 	if err != nil {
@@ -118,7 +143,7 @@ func RunRemoval(directory, outputFile string, reader *bufio.Reader, removeValue 
 	pterm.Info.Printf("Total strings removed: %d\n", totalStringsRemoved)
 
 	if outputFile != "" {
-		if err := reporter.WriteModificationsToFile(outputFile, modifications, totalFilesScanned, totalStringsRemoved); err != nil {
+		if err := reporter.WriteModificationsToFile(outputFile, modifications, int(totalFilesScanned), int(totalStringsRemoved)); err != nil {
 			return fmt.Errorf("error writing to output file: %w", err)
 		}
 		pterm.Success.Printf("Results have been saved to: %s\n", outputFile)

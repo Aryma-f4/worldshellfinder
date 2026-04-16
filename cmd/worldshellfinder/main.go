@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/Aryma-f4/worldshellfinder/internal/config"
@@ -33,6 +34,7 @@ func main() {
 	maxEvidenceFlag := flag.Int("max-evidence", config.DefaultMaxEvidence, "maximum evidence entries shown per file")
 	removeStringFlag := flag.String("remove-string", "", "string to remove in remove mode")
 	vtApiKeyFlag := flag.String("vt-api-key", "", "VirusTotal API key for malware reference database")
+	workersFlag := flag.Int("workers", runtime.NumCPU(), "number of concurrent workers for scanning files")
 	flag.Parse()
 
 	verbose = *verboseFlag
@@ -72,15 +74,15 @@ func main() {
 		}
 		switch mode {
 		case "detect":
-			if err := scanner.RunDetection(directory, wordlistPath, outputFile, *minScoreFlag, *maxEvidenceFlag, vtApiKey, verbose, defaultWordlist); err != nil {
+			if err := scanner.RunDetection(directory, wordlistPath, outputFile, *minScoreFlag, *maxEvidenceFlag, vtApiKey, verbose, defaultWordlist, *workersFlag); err != nil {
 				pterm.Fatal.Printf("Detection failed: %v\n", err)
 			}
 		case "deep":
-			if err := scanner.RunDeepScan(directory, wordlistPath, outputFile, *minScoreFlag, *maxEvidenceFlag, vtApiKey, verbose, defaultWordlist); err != nil {
+			if err := scanner.RunDeepScan(directory, wordlistPath, outputFile, *minScoreFlag, *maxEvidenceFlag, vtApiKey, verbose, defaultWordlist, *workersFlag); err != nil {
 				pterm.Fatal.Printf("Deep scan failed: %v\n", err)
 			}
 		case "remove":
-			if err := remover.RunRemoval(directory, outputFile, reader, *removeStringFlag, verbose); err != nil {
+			if err := remover.RunRemoval(directory, outputFile, reader, *removeStringFlag, verbose, *workersFlag); err != nil {
 				pterm.Fatal.Printf("String removal failed: %v\n", err)
 			}
 		default:
@@ -122,12 +124,12 @@ func main() {
 			vtApiKey, _ = pterm.DefaultInteractiveTextInput.Show("Enter VirusTotal API Key (press Enter to skip)")
 			vtApiKey = strings.TrimSpace(vtApiKey)
 		}
-		err := scanner.RunDetection(directory, wordlistPath, outputFile, *minScoreFlag, *maxEvidenceFlag, vtApiKey, verbose, defaultWordlist)
+		err := scanner.RunDetection(directory, wordlistPath, outputFile, *minScoreFlag, *maxEvidenceFlag, vtApiKey, verbose, defaultWordlist, *workersFlag)
 		if err != nil {
 			pterm.Fatal.Printf("Detection failed: %v\n", err)
 		}
 	case "2. Remove String from Files":
-		err := remover.RunRemoval(directory, outputFile, reader, *removeStringFlag, verbose)
+		err := remover.RunRemoval(directory, outputFile, reader, *removeStringFlag, verbose, *workersFlag)
 		if err != nil {
 			pterm.Fatal.Printf("String removal failed: %v\n", err)
 		}
@@ -140,7 +142,7 @@ func main() {
 			vtApiKey, _ = pterm.DefaultInteractiveTextInput.Show("Enter VirusTotal API Key (press Enter to skip)")
 			vtApiKey = strings.TrimSpace(vtApiKey)
 		}
-		err := scanner.RunDeepScan(directory, wordlistPath, outputFile, *minScoreFlag, *maxEvidenceFlag, vtApiKey, verbose, defaultWordlist)
+		err := scanner.RunDeepScan(directory, wordlistPath, outputFile, *minScoreFlag, *maxEvidenceFlag, vtApiKey, verbose, defaultWordlist, *workersFlag)
 		if err != nil {
 			pterm.Fatal.Printf("Deep scan failed: %v\n", err)
 		}
@@ -167,5 +169,6 @@ func printHelp() {
 	fmt.Println("  -max-evidence int       Maximum evidence entries shown per file (default: 5)")
 	fmt.Println("  -remove-string string   String to remove when mode=remove")
 	fmt.Println("  -vt-api-key string      VirusTotal API key for checking suspicious files")
+	fmt.Println("  -workers int            Number of concurrent workers for scanning files (default: number of CPUs)")
 	fmt.Println("  --update                Update to the latest release")
 }

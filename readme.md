@@ -26,6 +26,7 @@ This project is intended for educational, incident response, and defensive secur
 - Refactored into a **Clean Architecture** to ensure modularity, maintainability, and scalability.
 - Beautiful, intuitive **Interactive UI** powered by `pterm`.
 - Integrates **VirusTotal API** as a malware reference database to improve detection rules and confirm suspicious files.
+- Lightning fast **multi-threading support** via Goroutines and Worker Pools for massive directory scanning.
 - Detects suspicious files using a scoring-based engine.
 - Combines keyword matches, regex signatures, and heuristic indicators.
 - Supports custom wordlists on top of the embedded default wordlist.
@@ -150,6 +151,7 @@ Example:
 -max-evidence int       Maximum evidence entries shown per file
 -remove-string string   String to remove when mode=remove
 -vt-api-key string      VirusTotal API key for checking suspicious files against the malware database
+-workers int            Number of concurrent workers for scanning files (default: number of CPUs)
 --update                Update to the latest release
 ```
 

@@ -14,6 +14,9 @@ import (
 	"strings"
 
 	"github.com/Aryma-f4/worldshellfinder/internal/config"
+	"sync"
+	"sync/atomic"
+
 	"github.com/Aryma-f4/worldshellfinder/internal/models"
 	"github.com/Aryma-f4/worldshellfinder/internal/reporter"
 	"github.com/Aryma-f4/worldshellfinder/internal/utils"
@@ -139,9 +142,41 @@ func BuildScanConfig(wordlistPath string, minScore, maxEvidence int, vtApiKey st
 	}, nil
 }
 
-func ScanDirectory(directory string, cfg models.ScanConfig, verbose bool) (*models.ScanSummary, error) {
+func ScanDirectory(directory string, cfg models.ScanConfig, verbose bool, numWorkers int) (*models.ScanSummary, error) {
 	var detections []*models.ShellDetection
-	totalFilesScanned := 0
+	var totalFilesScanned int32
+	var mu sync.Mutex
+
+	fileChan := make(chan string, 1000)
+	var wg sync.WaitGroup
+
+	if numWorkers <= 0 {
+		numWorkers = 1
+	}
+
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for path := range fileChan {
+				atomic.AddInt32(&totalFilesScanned, 1)
+				if verbose {
+					pterm.Info.Printf("Scanning: %s\n", path)
+				}
+
+				detection, err := analyzeFile(path, cfg)
+				if err != nil {
+					utils.LogReadIssue(path, err)
+					continue
+				}
+				if detection != nil {
+					mu.Lock()
+					detections = append(detections, detection)
+					mu.Unlock()
+				}
+			}
+		}()
+	}
 
 	err := filepath.Walk(directory, func(path string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil {
@@ -152,21 +187,13 @@ func ScanDirectory(directory string, cfg models.ScanConfig, verbose bool) (*mode
 			return nil
 		}
 
-		totalFilesScanned++
-		if verbose {
-			pterm.Info.Printf("Scanning: %s\n", path)
-		}
-
-		detection, err := analyzeFile(path, cfg)
-		if err != nil {
-			utils.LogReadIssue(path, err)
-			return nil
-		}
-		if detection != nil {
-			detections = append(detections, detection)
-		}
+		fileChan <- path
 		return nil
 	})
+	
+	close(fileChan)
+	wg.Wait()
+
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +207,7 @@ func ScanDirectory(directory string, cfg models.ScanConfig, verbose bool) (*mode
 
 	return &models.ScanSummary{
 		Detections:        detections,
-		TotalFilesScanned: totalFilesScanned,
+		TotalFilesScanned: int(totalFilesScanned),
 	}, nil
 }
 
@@ -425,7 +452,7 @@ func updateIndicators(line string, indicators *scanIndicators) {
 	}
 }
 
-func RunDetection(directory, wordlistPath, outputFile string, minScore, maxEvidence int, vtApiKey string, verbose bool, defaultWordlist embed.FS) error {
+func RunDetection(directory, wordlistPath, outputFile string, minScore, maxEvidence int, vtApiKey string, verbose bool, defaultWordlist embed.FS, numWorkers int) error {
 	cfg, err := BuildScanConfig(wordlistPath, minScore, maxEvidence, vtApiKey, defaultWordlist)
 	if err != nil {
 		return err
@@ -433,7 +460,7 @@ func RunDetection(directory, wordlistPath, outputFile string, minScore, maxEvide
 
 	done := make(chan bool)
 	go utils.LoadingAnimation(done)
-	summary, err := ScanDirectory(directory, cfg, verbose)
+	summary, err := ScanDirectory(directory, cfg, verbose, numWorkers)
 	done <- true
 	if err != nil {
 		return err
