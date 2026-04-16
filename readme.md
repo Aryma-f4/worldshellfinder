@@ -42,6 +42,9 @@ This project is intended for educational, incident response, and defensive secur
 The scanner evaluates files using multiple signals:
 
 - Text-based webshell patterns (keyword + regex rules + heuristic scoring).
+- **YARA-like Advanced Heuristics (Pure Go):**
+  - **Shannon Entropy Analysis:** Detects highly obfuscated payloads (like hidden Base64 or Hex blobs) by calculating the mathematical information density of contiguous strings.
+  - **Memory-Efficient Binary Streaming:** Parses executable and binary-format files for C2/Backdoor indicators without loading massive files into RAM.
 - **Core File Integrity Verification:** Automatically detects framework installations and verifies core/vendor files. Unmodified files are safely ignored (Zero False Positives), while modified core files are immediately flagged! Supported frameworks:
   - **WordPress** (Full MD5 checksum validation via official API)
   - **Laravel** (Vendor path validation via `artisan` root detection)

@@ -3,6 +3,7 @@ package utils
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"runtime"
@@ -138,4 +139,20 @@ func LooksLikeText(sample []byte) bool {
 		}
 	}
 	return float64(printable)/float64(len(sample)) >= 0.75
+}
+
+func CalculateEntropy(data []byte) float64 {
+	if len(data) == 0 {
+		return 0
+	}
+	freq := make(map[byte]float64)
+	for _, b := range data {
+		freq[b]++
+	}
+	entropy := 0.0
+	for _, f := range freq {
+		p := f / float64(len(data))
+		entropy -= p * math.Log2(p)
+	}
+	return entropy
 }

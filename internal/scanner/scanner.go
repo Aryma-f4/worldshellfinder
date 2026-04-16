@@ -234,6 +234,21 @@ func ScanDirectories(directories []string, cfg models.ScanConfig, verbose bool, 
 	}, nil
 }
 
+var (
+	bufferPool8K = sync.Pool{
+		New: func() interface{} {
+			b := make([]byte, 8192)
+			return &b
+		},
+	}
+	bufferPool1M = sync.Pool{
+		New: func() interface{} {
+			b := make([]byte, 1024*1024)
+			return &b
+		},
+	}
+)
+
 func shouldScanFile(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
 	if _, ok := config.SuspiciousExtensions[ext]; ok {
@@ -244,6 +259,11 @@ func shouldScanFile(path string) bool {
 	if err != nil {
 		return false
 	}
+	
+	// Skip files larger than 50MB to prevent OOM
+	if info.Size() > 50*1024*1024 {
+		return false
+	}
 
 	file, err := os.Open(path)
 	if err != nil {
@@ -251,7 +271,10 @@ func shouldScanFile(path string) bool {
 	}
 	defer file.Close()
 
-	buffer := make([]byte, 8192)
+	bufPtr := bufferPool8K.Get().(*[]byte)
+	buffer := *bufPtr
+	defer bufferPool8K.Put(bufPtr)
+
 	n, err := file.Read(buffer)
 	if err != nil && err != io.EOF {
 		return false
@@ -283,7 +306,10 @@ func analyzeFile(filename string, cfg models.ScanConfig) (*models.ShellDetection
 	}
 	defer file.Close()
 
-	buffer := make([]byte, 8192)
+	bufPtr := bufferPool8K.Get().(*[]byte)
+	buffer := *bufPtr
+	defer bufferPool8K.Put(bufPtr)
+
 	n, err := file.Read(buffer)
 	if err != nil && err != io.EOF {
 		return nil, err
@@ -413,7 +439,9 @@ func applyVirusTotal(apiKey, filename string, score *int, evidences *[]models.Sh
 
 func analyzeReader(filename string, reader io.Reader, cfg models.ScanConfig) (*models.ShellDetection, error) {
 	scanner := bufio.NewScanner(reader)
-	buf := make([]byte, 1024*1024)
+	bufPtr := bufferPool1M.Get().(*[]byte)
+	buf := *bufPtr
+	defer bufferPool1M.Put(bufPtr)
 	scanner.Buffer(buf, 20*1024*1024)
 
 	score := 0
@@ -422,11 +450,38 @@ func analyzeReader(filename string, reader io.Reader, cfg models.ScanConfig) (*m
 	indicators := scanIndicators{}
 	lineNumber := 0
 
+	isSourceCode := !strings.HasSuffix(strings.ToLower(filename), ".js") && !strings.HasSuffix(strings.ToLower(filename), ".json") && !strings.HasSuffix(strings.ToLower(filename), ".css")
+
 	for scanner.Scan() {
 		lineNumber++
 		line := scanner.Text()
 		lowerLine := strings.ToLower(line)
 		updateIndicators(lowerLine, &indicators)
+
+		if isSourceCode && len(line) > 100 {
+			fields := strings.FieldsFunc(line, func(r rune) bool {
+				return r == ' ' || r == '"' || r == '\'' || r == ';' || r == '(' || r == ')'
+			})
+			for _, field := range fields {
+				if len(field) > 120 {
+					ent := utils.CalculateEntropy([]byte(field))
+					if ent > 5.5 {
+						key := "entropy:" + field[:20]
+						if _, exists := seen[key]; !exists {
+							seen[key] = struct{}{}
+							score += 3
+							evidences = append(evidences, models.ShellEvidence{
+								Kind:       "heuristic",
+								Name:       "high entropy string (obfuscation/payload)",
+								Weight:     3,
+								LineNumber: lineNumber,
+								Matched:    utils.ShortenEvidence(field),
+							})
+						}
+					}
+				}
+			}
+		}
 
 		for _, keyword := range cfg.Keywords {
 			if !strings.Contains(lowerLine, keyword.Word) {
@@ -485,10 +540,9 @@ func analyzeBinaryReader(filename string, reader io.Reader, cfg models.ScanConfi
 	const minStringLen = 6
 	const maxEvidenceHits = 64
 
-	data, err := io.ReadAll(io.LimitReader(reader, maxBinaryBytes))
-	if err != nil {
-		return nil, err
-	}
+	bufPtr := bufferPool1M.Get().(*[]byte)
+	buf := *bufPtr
+	defer bufferPool1M.Put(bufPtr)
 
 	score := 0
 	evidences := make([]models.ShellEvidence, 0, cfg.MaxEvidence)
@@ -661,50 +715,58 @@ func analyzeBinaryReader(filename string, reader io.Reader, cfg models.ScanConfi
 		}
 
 		if binaryURLRx.MatchString(s) {
-			key := "bin:url"
+			key := "bin:url:" + s
 			if _, ok := seen[key]; !ok {
 				seen[key] = struct{}{}
-				score += 5
+				score += 2
 				urlHits++
 				evidences = append(evidences, models.ShellEvidence{
 					Kind:       "binary",
-					Name:       "hardcoded url",
-					Weight:     5,
+					Name:       "suspicious url",
+					Weight:     2,
 					LineNumber: 0,
 					Matched:    utils.ShortenEvidence(s),
 				})
 			}
-		}
-
-		if binaryIPPortRx.MatchString(s) {
-			key := "bin:ipport"
+		} else if binaryIPPortRx.MatchString(s) {
+			key := "bin:ipport:" + s
 			if _, ok := seen[key]; !ok {
 				seen[key] = struct{}{}
-				score += 4
+				score += 2
 				ipPortHits++
 				evidences = append(evidences, models.ShellEvidence{
 					Kind:       "binary",
 					Name:       "hardcoded ip:port",
-					Weight:     4,
+					Weight:     2,
 					LineNumber: 0,
-					Matched:    utils.ShortenEvidence(s),
+					Matched:    s,
 				})
 			}
-		}
-
-		if binaryDomainRx.MatchString(s) {
-			domainHits++
+		} else if binaryDomainRx.MatchString(s) {
+			key := "bin:domain:" + s
+			if _, ok := seen[key]; !ok {
+				seen[key] = struct{}{}
+				domainHits++
+			}
 		}
 	}
 
-	for _, b := range data {
-		if (b >= 32 && b <= 126) || b == '\t' {
-			if len(current) < 4096 {
-				current = append(current, b)
+	limitReader := io.LimitReader(reader, maxBinaryBytes)
+	for {
+		n, err := limitReader.Read(buf)
+		chunk := buf[:n]
+		for _, b := range chunk {
+			if (b >= 32 && b <= 126) || b == '\t' {
+				if len(current) < 4096 {
+					current = append(current, b)
+				}
+				continue
 			}
-			continue
+			flush()
 		}
-		flush()
+		if err != nil {
+			break
+		}
 	}
 	flush()
 
