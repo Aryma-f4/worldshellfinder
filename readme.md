@@ -15,7 +15,7 @@ World Shell Finder is a Go command-line tool for detecting suspicious web shells
   <img src="https://img.shields.io/github/repo-size/Aryma-f4/worldshellfinder" alt="Repository size">
 </p>
 
-![Worldshellfinder flow](https://github.com/user-attachments/assets/430df5ec-d1b3-46f8-9fdd-27be51c30d88)
+
 
 ## Disclaimer
 
@@ -47,6 +47,62 @@ The scanner evaluates files using multiple signals:
 - Known shell markers from the bundled wordlist.
 
 Files are reported when their suspicion score reaches the configured threshold.
+
+### How It Works (Architecture & Flow)
+
+```mermaid
+graph TD
+    A[Start Scan] --> B{Operation Mode}
+    B -->|Detect / Deep| C[Load Config & Wordlists]
+    B -->|Remove| D[Load String to Remove]
+
+    C --> E[Initialize Worker Pool]
+    
+    subgraph Multi-Threaded Scanning
+        E --> F[Walk Directory]
+        F --> G[Push Files to Channel]
+        G --> H1[Worker 1]
+        G --> H2[Worker 2]
+        G --> H3[Worker N]
+    end
+
+    H1 --> I{File Type Check}
+    I -->|Suspicious Extension| J[Analyze File Content]
+    I -->|Unknown Extension| K{Looks Like Text?}
+    K -->|Yes| J
+    K -->|No| L[Skip File]
+
+    J --> M[Match Keywords & Rules]
+    M --> N[Apply Heuristics]
+    N --> O{Score >= 8 & VT API Key set?}
+    
+    O -->|Yes| P[Calculate SHA256 Hash]
+    P --> Q{Check Local Cache}
+    Q -->|Found| R[Apply Cached VT Result]
+    Q -->|Not Found| S[Rate Limited Request to VirusTotal API]
+    S --> R
+    R --> T{Is Malicious?}
+    T -->|Yes| U[Add +10 Score]
+    T -->|No| V[Keep Current Score]
+    
+    O -->|No| V
+    U --> W
+    V --> W{Score >= Min Threshold?}
+    
+    W -->|Yes| X[Print Alert Immediately]
+    W -->|No| L
+    
+    X --> Y[Store in Results]
+    
+    Y --> Z
+    L --> Z
+    
+    Z[Wait All Workers to Finish] --> AA{Is Deep Scan?}
+    AA -->|Yes| AB[Run Traffic, Log, Rootkit Scans]
+    AB --> AC
+    AA -->|No| AC[Print Final Summary & Save Report]
+    AC --> AD[End]
+```
 
 ## Installation
 
