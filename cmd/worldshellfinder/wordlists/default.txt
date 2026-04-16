@@ -158,6 +158,10 @@ systeminfo::1
 whoami::1
 id::1
 ipconfig::1
+elFinder.class.php::1
+elFinderVolumeDriver.class.php::1
+class-phpmailer.php::1
+wordfenceClass.php::1
 
 # Privilege Escalation / Persistence
 schtasks::2

@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 
 	"github.com/Aryma-f4/worldshellfinder/internal/config"
+	"github.com/Aryma-f4/worldshellfinder/internal/integrity"
 	"github.com/Aryma-f4/worldshellfinder/internal/models"
 	"github.com/Aryma-f4/worldshellfinder/internal/reporter"
 	"github.com/Aryma-f4/worldshellfinder/internal/utils"
@@ -266,7 +267,13 @@ func shouldScanFile(path string) bool {
 }
 
 func analyzeFile(filename string, cfg models.ScanConfig) (*models.ShellDetection, error) {
-	if !shouldScanFile(filename) {
+	coreResult, framework := integrity.CheckCoreFile(filename)
+	if coreResult == integrity.ResultMatch {
+		// File is a verified, unmodified core file of a known framework. Skip it!
+		return nil, nil
+	}
+
+	if !shouldScanFile(filename) && coreResult != integrity.ResultModified {
 		return nil, nil
 	}
 
@@ -278,7 +285,7 @@ func analyzeFile(filename string, cfg models.ScanConfig) (*models.ShellDetection
 
 	buffer := make([]byte, 8192)
 	n, err := file.Read(buffer)
-	if err != nil {
+	if err != nil && err != io.EOF {
 		return nil, err
 	}
 	reader := io.MultiReader(bytes.NewReader(buffer[:n]), file)
@@ -292,9 +299,47 @@ func analyzeFile(filename string, cfg models.ScanConfig) (*models.ShellDetection
 	if err != nil {
 		return nil, err
 	}
+
+	if coreResult == integrity.ResultModified {
+		if detection == nil {
+			detection = &models.ShellDetection{
+				Path:      filename,
+				Score:     0,
+				Evidences: make([]models.ShellEvidence, 0),
+			}
+		}
+		detection.Score += 20
+		detection.Evidences = append(detection.Evidences, models.ShellEvidence{
+			Kind:       "integrity",
+			Name:       framework + " Core File Modified",
+			Weight:     20,
+			LineNumber: 0,
+			Matched:    "MD5 checksum mismatch with official repository",
+		})
+	}
+
 	if detection != nil {
 		detection.Path = filename
+		if detection.Score < cfg.MinScore {
+			return nil, nil
+		}
+
+		sort.Slice(detection.Evidences, func(i, j int) bool {
+			if detection.Evidences[i].Weight == detection.Evidences[j].Weight {
+				return detection.Evidences[i].LineNumber < detection.Evidences[j].LineNumber
+			}
+			return detection.Evidences[i].Weight > detection.Evidences[j].Weight
+		})
+
+		maxEv := cfg.MaxEvidence
+		if maxEv <= 0 {
+			maxEv = config.DefaultMaxEvidence
+		}
+		if len(detection.Evidences) > maxEv {
+			detection.Evidences = detection.Evidences[:maxEv]
+		}
 	}
+
 	return detection, nil
 }
 
@@ -428,25 +473,6 @@ func analyzeReader(filename string, reader io.Reader, cfg models.ScanConfig) (*m
 	score, evidences = addHeuristicEvidence(score, evidences, indicators, seen)
 	applyVirusTotal(cfg.VTApiKey, filename, &score, &evidences)
 
-	if score < cfg.MinScore {
-		return nil, nil
-	}
-
-	sort.Slice(evidences, func(i, j int) bool {
-		if evidences[i].Weight == evidences[j].Weight {
-			return evidences[i].LineNumber < evidences[j].LineNumber
-		}
-		return evidences[i].Weight > evidences[j].Weight
-	})
-
-	maxEvidence := cfg.MaxEvidence
-	if maxEvidence <= 0 {
-		maxEvidence = config.DefaultMaxEvidence
-	}
-	if len(evidences) > maxEvidence {
-		evidences = evidences[:maxEvidence]
-	}
-
 	return &models.ShellDetection{
 		Path:      filename,
 		Score:     score,
@@ -525,6 +551,23 @@ func analyzeBinaryReader(filename string, reader io.Reader, cfg models.ScanConfi
 
 		if len(seen) > maxEvidenceHits {
 			return
+		}
+
+		for _, keyword := range cfg.Keywords {
+			if strings.Contains(s, keyword.Word) {
+				key := "bin:kw:" + keyword.Word
+				if _, ok := seen[key]; !ok {
+					seen[key] = struct{}{}
+					score += keyword.Weight
+					evidences = append(evidences, models.ShellEvidence{
+						Kind:       "keyword",
+						Name:       keyword.Word,
+						Weight:     keyword.Weight,
+						LineNumber: 0,
+						Matched:    utils.ShortenEvidence(s),
+					})
+				}
+			}
 		}
 
 		for _, needle := range networkAPIs {
@@ -612,23 +655,6 @@ func analyzeBinaryReader(filename string, reader io.Reader, cfg models.ScanConfi
 						Weight:     3,
 						LineNumber: 0,
 						Matched:    needle,
-					})
-				}
-			}
-		}
-
-		for _, keyword := range cfg.Keywords {
-			if strings.Contains(s, keyword.Word) {
-				key := "bin:kw:" + keyword.Word
-				if _, ok := seen[key]; !ok {
-					seen[key] = struct{}{}
-					score += keyword.Weight
-					evidences = append(evidences, models.ShellEvidence{
-						Kind:       "keyword",
-						Name:       keyword.Word,
-						Weight:     keyword.Weight,
-						LineNumber: 0,
-						Matched:    s,
 					})
 				}
 			}
@@ -728,25 +754,6 @@ func analyzeBinaryReader(filename string, reader io.Reader, cfg models.ScanConfi
 	}
 
 	applyVirusTotal(cfg.VTApiKey, filename, &score, &evidences)
-
-	if score < cfg.MinScore {
-		return nil, nil
-	}
-
-	sort.Slice(evidences, func(i, j int) bool {
-		if evidences[i].Weight == evidences[j].Weight {
-			return evidences[i].LineNumber < evidences[j].LineNumber
-		}
-		return evidences[i].Weight > evidences[j].Weight
-	})
-
-	maxEvidence := cfg.MaxEvidence
-	if maxEvidence <= 0 {
-		maxEvidence = config.DefaultMaxEvidence
-	}
-	if len(evidences) > maxEvidence {
-		evidences = evidences[:maxEvidence]
-	}
 
 	return &models.ShellDetection{
 		Path:      filename,

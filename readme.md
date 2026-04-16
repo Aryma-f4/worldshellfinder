@@ -42,11 +42,7 @@ This project is intended for educational, incident response, and defensive secur
 The scanner evaluates files using multiple signals:
 
 - Text-based webshell patterns (keyword + regex rules + heuristic scoring).
-  - Strong signatures such as obfuscated `eval(base64_decode(...))` patterns.
-  - Dangerous runtime execution flows like `system($_REQUEST['cmd'])`.
-  - Upload and dropper behavior such as `move_uploaded_file(... .php)`.
-  - Heuristic combinations like user input plus command execution.
-  - Known shell markers from the bundled wordlist.
+- **Core File Integrity Verification (WordPress):** Automatically detects WordPress installations, fetches official checksums via API, and verifies core files. Unmodified files are safely ignored (Zero False Positives), while modified core files are immediately flagged!
 - Binary backdoor / C2 indicators (for executable or binary-format files).
   - Hardcoded URLs, IP:PORT, many domain-like strings.
   - Networking-related strings (WinHTTP/WinINet/Winsock, `socket/connect/send/recv`, libcurl, HTTP headers).
@@ -82,9 +78,15 @@ graph TD
         GR --> RH[Workers Remove String]
     end
 
-    H1 --> I{File Type Check}
-    I -->|Suspicious Extension| J[Analyze as Text]
-    I -->|Unknown Extension| K{Looks Like Text?}
+    H1 --> I{Core File Integrity}
+    I -->|Match Official Checksum| L[Safe / Skip File]
+    I -->|Modified Checksum| J1[Add +20 Score]
+    I -->|Not a Core File| J2{File Type Check}
+
+    J1 --> J2
+    
+    J2 -->|Suspicious Extension| J[Analyze as Text]
+    J2 -->|Unknown Extension| K{Looks Like Text?}
     K -->|Yes| J
     K -->|No| K2{Executable or Known Binary Format?}
     K2 -->|Yes| JB["Analyze as Binary (strings)"]
