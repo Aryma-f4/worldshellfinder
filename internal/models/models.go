@@ -29,8 +29,13 @@ type ShellDetection struct {
 	Evidences []ShellEvidence
 }
 
+type KeywordRule struct {
+	Word   string
+	Weight int
+}
+
 type ScanConfig struct {
-	Keywords    []string
+	Keywords    []KeywordRule
 	Rules       []DetectionRule
 	MinScore    int
 	MaxEvidence int

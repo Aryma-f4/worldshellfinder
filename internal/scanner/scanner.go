@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -33,7 +34,7 @@ type scanIndicators struct {
 	shellMarkerHits int
 }
 
-func LoadKeywords(wordlistPath string, defaultWordlist embed.FS) ([]string, error) {
+func LoadKeywords(wordlistPath string, defaultWordlist embed.FS) ([]models.KeywordRule, error) {
 	file, err := defaultWordlist.Open("wordlists/default.txt")
 	if err != nil {
 		return nil, err
@@ -58,9 +59,9 @@ func LoadKeywords(wordlistPath string, defaultWordlist embed.FS) ([]string, erro
 	}
 
 	seen := make(map[string]struct{}, len(keywords))
-	deduped := make([]string, 0, len(keywords))
+	var deduped []models.KeywordRule
 	for _, keyword := range keywords {
-		normalized := strings.ToLower(strings.TrimSpace(keyword))
+		normalized := strings.ToLower(strings.TrimSpace(keyword.Word))
 		if normalized == "" {
 			continue
 		}
@@ -68,19 +69,30 @@ func LoadKeywords(wordlistPath string, defaultWordlist embed.FS) ([]string, erro
 			continue
 		}
 		seen[normalized] = struct{}{}
-		deduped = append(deduped, normalized)
+		deduped = append(deduped, models.KeywordRule{Word: normalized, Weight: keyword.Weight})
 	}
 
 	return deduped, nil
 }
 
-func scanKeywordReader(r io.Reader) ([]string, error) {
-	var keywords []string
+func scanKeywordReader(r io.Reader) ([]models.KeywordRule, error) {
+	var keywords []models.KeywordRule
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
-		keyword := strings.TrimSpace(scanner.Text())
-		if keyword != "" {
-			keywords = append(keywords, keyword)
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, "::", 2)
+		word := parts[0]
+		weight := 4 // Default weight for legacy lists
+		if len(parts) == 2 {
+			if w, err := strconv.Atoi(strings.TrimSpace(parts[1])); err == nil {
+				weight = w
+			}
+		}
+		if word != "" {
+			keywords = append(keywords, models.KeywordRule{Word: word, Weight: weight})
 		}
 	}
 	return keywords, scanner.Err()
@@ -372,19 +384,19 @@ func analyzeReader(filename string, reader io.Reader, cfg models.ScanConfig) (*m
 		updateIndicators(lowerLine, &indicators)
 
 		for _, keyword := range cfg.Keywords {
-			if !strings.Contains(lowerLine, keyword) {
+			if !strings.Contains(lowerLine, keyword.Word) {
 				continue
 			}
-			key := "keyword:" + keyword
+			key := "keyword:" + keyword.Word
 			if _, exists := seen[key]; exists {
 				continue
 			}
 			seen[key] = struct{}{}
-			score += 4
+			score += keyword.Weight
 			evidences = append(evidences, models.ShellEvidence{
 				Kind:       "keyword",
-				Name:       keyword,
-				Weight:     4,
+				Name:       keyword.Word,
+				Weight:     keyword.Weight,
 				LineNumber: lineNumber,
 				Matched:    utils.ShortenEvidence(line),
 			})
@@ -600,6 +612,23 @@ func analyzeBinaryReader(filename string, reader io.Reader, cfg models.ScanConfi
 						Weight:     3,
 						LineNumber: 0,
 						Matched:    needle,
+					})
+				}
+			}
+		}
+
+		for _, keyword := range cfg.Keywords {
+			if strings.Contains(s, keyword.Word) {
+				key := "bin:kw:" + keyword.Word
+				if _, ok := seen[key]; !ok {
+					seen[key] = struct{}{}
+					score += keyword.Weight
+					evidences = append(evidences, models.ShellEvidence{
+						Kind:       "keyword",
+						Name:       keyword.Word,
+						Weight:     keyword.Weight,
+						LineNumber: 0,
+						Matched:    s,
 					})
 				}
 			}

@@ -243,11 +243,23 @@ Example:
 
 ## Wordlists
 
-The wordlist format is simple:
+The wordlist format allows defining custom weights:
 
 - One keyword or signature per line.
-- Empty lines are ignored.
+- Use `::` to assign a specific score to a keyword (e.g., `keyword::score`).
+- If no score is provided, the keyword defaults to a weight of 4.
+- Empty lines and lines starting with `#` are ignored.
 - Custom entries are merged with the embedded default wordlist.
+
+Example `custom.txt`:
+```text
+# Give a high score for a specific backdoor signature
+c99shell::6
+
+# Give a low score for system enumeration to avoid false positives
+systeminfo::1
+whoami::1
+```
 
 See:
 
