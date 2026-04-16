@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pterm/pterm"
@@ -13,11 +14,13 @@ import (
 var (
 	cache    = make(map[string]VTResult)
 	cacheMut sync.RWMutex
-	
+
+	disabled atomic.Bool
+
 	// Rate limiting state
 	lastRequestTime time.Time
 	requestMut      sync.Mutex
-	
+
 	// API Limits (Free Tier)
 	requestsPerMinute = 4
 	minRequestDelay   = time.Minute / time.Duration(requestsPerMinute)
@@ -47,6 +50,9 @@ func CheckHash(apiKey, hash string) (VTResult, error) {
 	if apiKey == "" {
 		return VTResult{}, nil
 	}
+	if disabled.Load() {
+		return VTResult{}, nil
+	}
 
 	// Check cache first
 	cacheMut.RLock()
@@ -60,7 +66,7 @@ func CheckHash(apiKey, hash string) (VTResult, error) {
 	requestMut.Lock()
 	now := time.Now()
 	timeSinceLastRequest := now.Sub(lastRequestTime)
-	
+
 	if timeSinceLastRequest < minRequestDelay {
 		waitTime := minRequestDelay - timeSinceLastRequest
 		pterm.Warning.Printf("VirusTotal API rate limit (4/min). Waiting %v before next request...\n", waitTime.Round(time.Second))
@@ -90,8 +96,9 @@ func CheckHash(apiKey, hash string) (VTResult, error) {
 		cacheMut.Unlock()
 		return res, nil
 	}
-	
+
 	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == 429 {
+		disabled.Store(true)
 		pterm.Error.Println("VirusTotal API daily/monthly quota exceeded or rate limited. Skipping further VT checks for now.")
 		return VTResult{}, fmt.Errorf("virustotal api quota exceeded (429)")
 	}
@@ -114,10 +121,10 @@ func CheckHash(apiKey, hash string) (VTResult, error) {
 		Undetected: vtResp.Data.Attributes.LastAnalysisStats.Undetected,
 		Queried:    true,
 	}
-	
+
 	cacheMut.Lock()
 	cache[hash] = res
 	cacheMut.Unlock()
-	
+
 	return res, nil
 }

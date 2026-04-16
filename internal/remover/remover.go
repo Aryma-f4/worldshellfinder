@@ -128,7 +128,7 @@ func RunRemoval(directory, outputFile string, reader *bufio.Reader, removeValue 
 		fileChan <- path
 		return nil
 	})
-	
+
 	close(fileChan)
 	wg.Wait()
 

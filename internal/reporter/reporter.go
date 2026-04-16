@@ -4,15 +4,15 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"time"
 	"strings"
+	"time"
 
 	"github.com/Aryma-f4/worldshellfinder/internal/models"
 	"github.com/pterm/pterm"
 )
 
 func PrintSingleDetection(detect *models.ShellDetection, verbose bool) {
-	fmt.Print("\r") // clear the loading animation line
+	fmt.Print("\r")
 	pterm.Warning.Printf("- File: %s\n", detect.Path)
 	pterm.Warning.Printf("  Suspicion score: %d\n", detect.Score)
 	for _, evidence := range detect.Evidences {

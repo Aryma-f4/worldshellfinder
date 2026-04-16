@@ -2,9 +2,10 @@ package scanner
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
-	"encoding/hex"
 	"embed"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -12,11 +13,10 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-
-	"github.com/Aryma-f4/worldshellfinder/internal/config"
 	"sync"
 	"sync/atomic"
 
+	"github.com/Aryma-f4/worldshellfinder/internal/config"
 	"github.com/Aryma-f4/worldshellfinder/internal/models"
 	"github.com/Aryma-f4/worldshellfinder/internal/reporter"
 	"github.com/Aryma-f4/worldshellfinder/internal/utils"
@@ -146,6 +146,7 @@ func ScanDirectory(directory string, cfg models.ScanConfig, verbose bool, numWor
 	var detections []*models.ShellDetection
 	var totalFilesScanned int32
 	var mu sync.Mutex
+	var printMu sync.Mutex
 
 	fileChan := make(chan string, 1000)
 	var wg sync.WaitGroup
@@ -170,7 +171,9 @@ func ScanDirectory(directory string, cfg models.ScanConfig, verbose bool, numWor
 					continue
 				}
 				if detection != nil {
+					printMu.Lock()
 					reporter.PrintSingleDetection(detection, verbose)
+					printMu.Unlock()
 					mu.Lock()
 					detections = append(detections, detection)
 					mu.Unlock()
@@ -191,7 +194,7 @@ func ScanDirectory(directory string, cfg models.ScanConfig, verbose bool, numWor
 		fileChan <- path
 		return nil
 	})
-	
+
 	close(fileChan)
 	wg.Wait()
 
@@ -218,6 +221,11 @@ func shouldScanFile(path string) bool {
 		return true
 	}
 
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+
 	file, err := os.Open(path)
 	if err != nil {
 		return false
@@ -229,7 +237,14 @@ func shouldScanFile(path string) bool {
 	if err != nil && err != io.EOF {
 		return false
 	}
-	return utils.LooksLikeText(buffer[:n])
+	sample := buffer[:n]
+	if utils.LooksLikeText(sample) {
+		return true
+	}
+	if info.Mode()&0111 != 0 {
+		return true
+	}
+	return binaryFormat(sample) != ""
 }
 
 func analyzeFile(filename string, cfg models.ScanConfig) (*models.ShellDetection, error) {
@@ -243,7 +258,19 @@ func analyzeFile(filename string, cfg models.ScanConfig) (*models.ShellDetection
 	}
 	defer file.Close()
 
-	detection, err := analyzeReader(filename, file, cfg)
+	buffer := make([]byte, 8192)
+	n, err := file.Read(buffer)
+	if err != nil {
+		return nil, err
+	}
+	reader := io.MultiReader(bytes.NewReader(buffer[:n]), file)
+
+	var detection *models.ShellDetection
+	if utils.LooksLikeText(buffer[:n]) {
+		detection, err = analyzeReader(filename, reader, cfg)
+	} else {
+		detection, err = analyzeBinaryReader(filename, reader, cfg, buffer[:n])
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -264,6 +291,61 @@ func getFileHash(filename string) string {
 		return ""
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+var (
+	binaryURLRx    = regexp.MustCompile(`(?i)https?://[^\s"'\\]+`)
+	binaryIPPortRx = regexp.MustCompile(`\b\d{1,3}(?:\.\d{1,3}){3}:\d{2,5}\b`)
+	binaryDomainRx = regexp.MustCompile(`(?i)\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b`)
+)
+
+func binaryFormat(sample []byte) string {
+	if len(sample) < 4 {
+		return ""
+	}
+	if len(sample) >= 4 && sample[0] == 0x7f && sample[1] == 'E' && sample[2] == 'L' && sample[3] == 'F' {
+		return "ELF"
+	}
+	if len(sample) >= 2 && sample[0] == 'M' && sample[1] == 'Z' {
+		return "PE"
+	}
+	if len(sample) >= 4 {
+		magic := uint32(sample[0])<<24 | uint32(sample[1])<<16 | uint32(sample[2])<<8 | uint32(sample[3])
+		switch magic {
+		case 0xFEEDFACE, 0xFEEDFACF, 0xCEFAEDFE, 0xCFFAEDFE:
+			return "Mach-O"
+		case 0xCAFEBABE, 0xBEBAFECA:
+			return "Mach-O Fat"
+		}
+	}
+	return ""
+}
+
+func applyVirusTotal(apiKey, filename string, score *int, evidences *[]models.ShellEvidence) {
+	if apiKey == "" {
+		return
+	}
+	if *score < 8 {
+		return
+	}
+	hash := getFileHash(filename)
+	if hash == "" {
+		return
+	}
+	vtRes, err := virustotal.CheckHash(apiKey, hash)
+	if err != nil {
+		return
+	}
+	if vtRes.Queried && vtRes.Malicious > 0 {
+		*score += 10
+		*evidences = append(*evidences, models.ShellEvidence{
+			Kind:       "virustotal",
+			Name:       fmt.Sprintf("VirusTotal flagged as malicious (%d positives)", vtRes.Malicious),
+			Weight:     10,
+			LineNumber: 0,
+			Matched:    "File hash found in VirusTotal malware database",
+		})
+	}
 }
 
 func analyzeReader(filename string, reader io.Reader, cfg models.ScanConfig) (*models.ShellDetection, error) {
@@ -326,27 +408,291 @@ func analyzeReader(filename string, reader io.Reader, cfg models.ScanConfig) (*m
 	}
 
 	score, evidences = addHeuristicEvidence(score, evidences, indicators, seen)
+	applyVirusTotal(cfg.VTApiKey, filename, &score, &evidences)
 
-	// VirusTotal Integration - ONLY query if file is highly suspicious
-	if cfg.VTApiKey != "" && score >= 8 {
-		hash := getFileHash(filename)
-		if hash != "" {
-			vtRes, err := virustotal.CheckHash(cfg.VTApiKey, hash)
-			if err == nil && vtRes.Queried && vtRes.Malicious > 0 {
-				score += 10
-				evidences = append(evidences, models.ShellEvidence{
-					Kind:       "virustotal",
-					Name:       fmt.Sprintf("VirusTotal flagged as malicious (%d positives)", vtRes.Malicious),
-					Weight:     10,
-					LineNumber: 0,
-					Matched:    "File hash found in VirusTotal malware database",
-				})
-			} else if err != nil && strings.Contains(err.Error(), "429") {
-				// API Quota exceeded, disable VT checks for remainder of the scan
-				cfg.VTApiKey = "" 
+	if score < cfg.MinScore {
+		return nil, nil
+	}
+
+	sort.Slice(evidences, func(i, j int) bool {
+		if evidences[i].Weight == evidences[j].Weight {
+			return evidences[i].LineNumber < evidences[j].LineNumber
+		}
+		return evidences[i].Weight > evidences[j].Weight
+	})
+
+	maxEvidence := cfg.MaxEvidence
+	if maxEvidence <= 0 {
+		maxEvidence = config.DefaultMaxEvidence
+	}
+	if len(evidences) > maxEvidence {
+		evidences = evidences[:maxEvidence]
+	}
+
+	return &models.ShellDetection{
+		Path:      filename,
+		Score:     score,
+		Evidences: evidences,
+	}, nil
+}
+
+func analyzeBinaryReader(filename string, reader io.Reader, cfg models.ScanConfig, header []byte) (*models.ShellDetection, error) {
+	const maxBinaryBytes = 20 * 1024 * 1024
+	const minStringLen = 6
+	const maxEvidenceHits = 64
+
+	data, err := io.ReadAll(io.LimitReader(reader, maxBinaryBytes))
+	if err != nil {
+		return nil, err
+	}
+
+	score := 0
+	evidences := make([]models.ShellEvidence, 0, cfg.MaxEvidence)
+	seen := make(map[string]struct{})
+
+	format := binaryFormat(header)
+	if format != "" {
+		score += 2
+		evidences = append(evidences, models.ShellEvidence{
+			Kind:       "binary",
+			Name:       "executable format",
+			Weight:     2,
+			LineNumber: 0,
+			Matched:    format,
+		})
+	}
+
+	networkAPIHits := 0
+	urlHits := 0
+	ipPortHits := 0
+	domainHits := 0
+	c2Hits := 0
+	injectHits := 0
+	persistHits := 0
+	packerHits := 0
+
+	networkAPIs := []string{
+		"wsastartup", "ws2_32", "wininet", "winhttp", "internetopen", "internetconnect", "httpopenrequest", "winhttpreceive", "winhttpsend",
+		"socket", "connect", "recv", "send", "getaddrinfo", "gethostbyname", "dnsquery", "libcurl", "curl_easy", "curl_multi",
+		"cfnetwork", "nsurlsession", "urlsession", "cfsocket", "scnetworkreachability",
+		"net/http", "httpclient", "user-agent", "content-type", "authorization:",
+	}
+
+	c2Markers := []string{
+		"mythic", "apollo", "poseidon", "beacon", "callback", "tasking", "c2", "agent", "implant",
+		"sliver", "metasploit", "empire", "cobalt strike", "havoc", "bruteratel",
+	}
+
+	injectMarkers := []string{
+		"virtualalloc", "virtualprotect", "writeprocessmemory", "createremotethread", "ntcreatethreadex", "queueuserapc",
+		"rtlmovememory", "loadlibrary", "getprocaddress", "ntdll.dll",
+	}
+
+	persistMarkers := []string{
+		"schtasks", "reg add", "run\\", "runonce", "startup", "launchctl", "launchagents", "launchdaemons", "systemctl", "crontab", "rc.local",
+	}
+
+	packerMarkers := []string{
+		"upx!", "themida", "vmprotect", "mpress", "aspack",
+	}
+
+	current := make([]byte, 0, 256)
+	flush := func() {
+		if len(current) < minStringLen {
+			current = current[:0]
+			return
+		}
+		s := strings.ToLower(string(current))
+		current = current[:0]
+
+		if len(seen) > maxEvidenceHits {
+			return
+		}
+
+		for _, needle := range networkAPIs {
+			if strings.Contains(s, needle) {
+				key := "bin:net:" + needle
+				if _, ok := seen[key]; !ok {
+					seen[key] = struct{}{}
+					score += 3
+					networkAPIHits++
+					evidences = append(evidences, models.ShellEvidence{
+						Kind:       "binary",
+						Name:       "network indicator",
+						Weight:     3,
+						LineNumber: 0,
+						Matched:    needle,
+					})
+				}
 			}
 		}
+
+		for _, needle := range c2Markers {
+			if strings.Contains(s, needle) {
+				key := "bin:c2:" + needle
+				if _, ok := seen[key]; !ok {
+					seen[key] = struct{}{}
+					score += 4
+					c2Hits++
+					evidences = append(evidences, models.ShellEvidence{
+						Kind:       "binary",
+						Name:       "c2 marker",
+						Weight:     4,
+						LineNumber: 0,
+						Matched:    needle,
+					})
+				}
+			}
+		}
+
+		for _, needle := range injectMarkers {
+			if strings.Contains(s, needle) {
+				key := "bin:inj:" + needle
+				if _, ok := seen[key]; !ok {
+					seen[key] = struct{}{}
+					score += 5
+					injectHits++
+					evidences = append(evidences, models.ShellEvidence{
+						Kind:       "binary",
+						Name:       "process injection indicator",
+						Weight:     5,
+						LineNumber: 0,
+						Matched:    needle,
+					})
+				}
+			}
+		}
+
+		for _, needle := range persistMarkers {
+			if strings.Contains(s, needle) {
+				key := "bin:pers:" + needle
+				if _, ok := seen[key]; !ok {
+					seen[key] = struct{}{}
+					score += 4
+					persistHits++
+					evidences = append(evidences, models.ShellEvidence{
+						Kind:       "binary",
+						Name:       "persistence indicator",
+						Weight:     4,
+						LineNumber: 0,
+						Matched:    needle,
+					})
+				}
+			}
+		}
+
+		for _, needle := range packerMarkers {
+			if strings.Contains(s, needle) {
+				key := "bin:pack:" + needle
+				if _, ok := seen[key]; !ok {
+					seen[key] = struct{}{}
+					score += 3
+					packerHits++
+					evidences = append(evidences, models.ShellEvidence{
+						Kind:       "binary",
+						Name:       "packer indicator",
+						Weight:     3,
+						LineNumber: 0,
+						Matched:    needle,
+					})
+				}
+			}
+		}
+
+		if binaryURLRx.MatchString(s) {
+			key := "bin:url"
+			if _, ok := seen[key]; !ok {
+				seen[key] = struct{}{}
+				score += 5
+				urlHits++
+				evidences = append(evidences, models.ShellEvidence{
+					Kind:       "binary",
+					Name:       "hardcoded url",
+					Weight:     5,
+					LineNumber: 0,
+					Matched:    utils.ShortenEvidence(s),
+				})
+			}
+		}
+
+		if binaryIPPortRx.MatchString(s) {
+			key := "bin:ipport"
+			if _, ok := seen[key]; !ok {
+				seen[key] = struct{}{}
+				score += 4
+				ipPortHits++
+				evidences = append(evidences, models.ShellEvidence{
+					Kind:       "binary",
+					Name:       "hardcoded ip:port",
+					Weight:     4,
+					LineNumber: 0,
+					Matched:    utils.ShortenEvidence(s),
+				})
+			}
+		}
+
+		if binaryDomainRx.MatchString(s) {
+			domainHits++
+		}
 	}
+
+	for _, b := range data {
+		if (b >= 32 && b <= 126) || b == '\t' {
+			if len(current) < 4096 {
+				current = append(current, b)
+			}
+			continue
+		}
+		flush()
+	}
+	flush()
+
+	if networkAPIHits > 0 && (urlHits > 0 || ipPortHits > 0 || domainHits > 5) {
+		key := "bin:heur:net"
+		if _, ok := seen[key]; !ok {
+			seen[key] = struct{}{}
+			score += 5
+			evidences = append(evidences, models.ShellEvidence{
+				Kind:       "heuristic",
+				Name:       "binary contains networking indicators typical for C2/backdoor",
+				Weight:     5,
+				LineNumber: 0,
+				Matched:    "Networking APIs combined with hardcoded endpoints or domains.",
+			})
+		}
+	}
+
+	if (injectHits > 0 || persistHits > 0) && networkAPIHits > 0 {
+		key := "bin:heur:beh"
+		if _, ok := seen[key]; !ok {
+			seen[key] = struct{}{}
+			score += 5
+			evidences = append(evidences, models.ShellEvidence{
+				Kind:       "heuristic",
+				Name:       "binary contains malware-like behavior indicators",
+				Weight:     5,
+				LineNumber: 0,
+				Matched:    "Network indicators combined with persistence or injection markers.",
+			})
+		}
+	}
+
+	if packerHits > 0 && networkAPIHits > 0 {
+		key := "bin:heur:pack"
+		if _, ok := seen[key]; !ok {
+			seen[key] = struct{}{}
+			score += 3
+			evidences = append(evidences, models.ShellEvidence{
+				Kind:       "heuristic",
+				Name:       "packed binary with networking indicators",
+				Weight:     3,
+				LineNumber: 0,
+				Matched:    "Packer strings combined with networking-related strings.",
+			})
+		}
+	}
+
+	applyVirusTotal(cfg.VTApiKey, filename, &score, &evidences)
 
 	if score < cfg.MinScore {
 		return nil, nil

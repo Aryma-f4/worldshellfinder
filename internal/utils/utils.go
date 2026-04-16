@@ -16,7 +16,6 @@ import (
 )
 
 func LoadingAnimation(done chan bool) {
-	// Simple animation to not conflict with stdout printing
 	chars := []rune{'|', '/', '-', '\\'}
 	for {
 		select {
