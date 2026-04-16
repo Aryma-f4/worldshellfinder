@@ -142,7 +142,7 @@ func BuildScanConfig(wordlistPath string, minScore, maxEvidence int, vtApiKey st
 	}, nil
 }
 
-func ScanDirectory(directory string, cfg models.ScanConfig, verbose bool, numWorkers int) (*models.ScanSummary, error) {
+func ScanDirectories(directories []string, cfg models.ScanConfig, verbose bool, numWorkers int) (*models.ScanSummary, error) {
 	var detections []*models.ShellDetection
 	var totalFilesScanned int32
 	var mu sync.Mutex
@@ -802,7 +802,7 @@ func updateIndicators(line string, indicators *scanIndicators) {
 	}
 }
 
-func RunDetection(directory, wordlistPath, outputFile string, minScore, maxEvidence int, vtApiKey string, verbose bool, defaultWordlist embed.FS, numWorkers int) error {
+func RunDetection(directories []string, wordlistPath, outputFile string, minScore, maxEvidence int, vtApiKey string, verbose bool, defaultWordlist embed.FS, numWorkers int) error {
 	cfg, err := BuildScanConfig(wordlistPath, minScore, maxEvidence, vtApiKey, defaultWordlist)
 	if err != nil {
 		return err
@@ -810,7 +810,7 @@ func RunDetection(directory, wordlistPath, outputFile string, minScore, maxEvide
 
 	done := make(chan bool)
 	go utils.LoadingAnimation(done)
-	summary, err := ScanDirectory(directory, cfg, verbose, numWorkers)
+	summary, err := ScanDirectories(directories, cfg, verbose, numWorkers)
 	done <- true
 	fmt.Print("\rOperation complete!                          \n")
 	if err != nil {

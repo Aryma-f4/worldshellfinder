@@ -69,7 +69,7 @@ graph TD
     D --> ER["Initialize Worker Pool (-workers)"]
     
     subgraph Multi-Threaded Scanning
-        E --> F[Walk Directory]
+        E --> F[Walk Directories]
         F --> G[Push Files to Channel]
         G --> H1[Worker 1]
         G --> H2[Worker 2]
@@ -77,7 +77,7 @@ graph TD
     end
 
     subgraph Multi-Threaded Removal
-        ER --> FR[Walk Directory]
+        ER --> FR[Walk Directories]
         FR --> GR[Push Files to Channel]
         GR --> RH[Workers Remove String]
     end
@@ -166,6 +166,12 @@ Basic detection:
 ./worldshellfinder -mode detect -dir /var/www/html
 ```
 
+Detection via list of directories (recursive):
+
+```bash
+./worldshellfinder -mode detect -dir-list /tmp/list_of_dirs.txt
+```
+
 Verbose detection:
 
 ```bash
@@ -229,6 +235,7 @@ Example:
 -min-score int          Minimum score before a file is reported
 -max-evidence int       Maximum evidence entries shown per file
 -remove-string string   String to remove when mode=remove
+-dir-list string        File containing a list of directories to scan (one per line)
 -vt-api-key string      VirusTotal API key for checking suspicious files against the malware database
 -workers int            Number of concurrent workers for scanning files (default: number of CPUs)
 --update                Update to the latest release

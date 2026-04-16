@@ -10,7 +10,7 @@ import (
 	"github.com/pterm/pterm"
 )
 
-func RunDeepScan(directory, wordlistPath, outputFile string, minScore, maxEvidence int, vtApiKey string, verbose bool, defaultWordlist embed.FS, numWorkers int) error {
+func RunDeepScan(directories []string, wordlistPath, outputFile string, minScore, maxEvidence int, vtApiKey string, verbose bool, defaultWordlist embed.FS, numWorkers int) error {
 	cfg, err := BuildScanConfig(wordlistPath, minScore, maxEvidence, vtApiKey, defaultWordlist)
 	if err != nil {
 		return err
@@ -18,7 +18,7 @@ func RunDeepScan(directory, wordlistPath, outputFile string, minScore, maxEviden
 
 	done := make(chan bool)
 	go utils.LoadingAnimation(done)
-	fileSummary, err := ScanDirectory(directory, cfg, verbose, numWorkers)
+	fileSummary, err := ScanDirectories(directories, cfg, verbose, numWorkers)
 	if err != nil {
 		done <- true
 		fmt.Print("\rOperation complete!                          \n")

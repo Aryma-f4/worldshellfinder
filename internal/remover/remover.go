@@ -43,7 +43,7 @@ func removeStringFromFile(filePath string, stringToRemove string) (*models.FileM
 	}, nil
 }
 
-func RunRemoval(directory, outputFile string, reader *bufio.Reader, removeValue string, verbose bool, numWorkers int) error {
+func RunRemoval(directories []string, outputFile string, reader *bufio.Reader, removeValue string, verbose bool, numWorkers int) error {
 	stringToRemove := strings.TrimSpace(removeValue)
 	if stringToRemove == "" {
 		pterm.Info.Println("Enter string to remove (press Ctrl+D or Ctrl+Z when done):")
