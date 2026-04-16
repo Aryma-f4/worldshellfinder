@@ -42,7 +42,11 @@ This project is intended for educational, incident response, and defensive secur
 The scanner evaluates files using multiple signals:
 
 - Text-based webshell patterns (keyword + regex rules + heuristic scoring).
-- **Core File Integrity Verification (WordPress):** Automatically detects WordPress installations, fetches official checksums via API, and verifies core files. Unmodified files are safely ignored (Zero False Positives), while modified core files are immediately flagged!
+- **Core File Integrity Verification:** Automatically detects framework installations and verifies core/vendor files. Unmodified files are safely ignored (Zero False Positives), while modified core files are immediately flagged! Supported frameworks:
+  - **WordPress** (Full MD5 checksum validation via official API)
+  - **Laravel** (Vendor path validation via `artisan` root detection)
+  - **CodeIgniter 4** (System & Vendor path validation via `spark` root detection)
+  - **Yii2** (Vendor path validation via `yii` root detection)
 - Binary backdoor / C2 indicators (for executable or binary-format files).
   - Hardcoded URLs, IP:PORT, many domain-like strings.
   - Networking-related strings (WinHTTP/WinINet/Winsock, `socket/connect/send/recv`, libcurl, HTTP headers).
@@ -79,8 +83,8 @@ graph TD
     end
 
     H1 --> I{Core File Integrity}
-    I -->|Match Official Checksum| L[Safe / Skip File]
-    I -->|Modified Checksum| J1[Add +20 Score]
+    I -->|Match Known Framework Vendor/Core| L[Safe / Skip File]
+    I -->|Modified Checksum (WP)| J1[Add +20 Score]
     I -->|Not a Core File| J2{File Type Check}
 
     J1 --> J2

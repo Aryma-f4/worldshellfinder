@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,6 +26,9 @@ var (
 
 	wpChecksums   = make(map[string]map[string]string)
 	wpChecksumsMu sync.RWMutex
+
+	frameworkRoots   = make(map[string]string)
+	frameworkRootsMu sync.RWMutex
 
 	versionRegex = regexp.MustCompile(`\$wp_version\s*=\s*['"]([^'"]+)['"]`)
 )
@@ -113,6 +117,34 @@ func fetchWPChecksums(version string) (map[string]string, error) {
 }
 
 func CheckCoreFile(filePath string) (CheckResult, string) {
+	// First check WordPress
+	res, fw := checkWordPress(filePath)
+	if res != ResultUnknown {
+		return res, fw
+	}
+
+	// Then check Laravel
+	res, fw = checkLaravel(filePath)
+	if res != ResultUnknown {
+		return res, fw
+	}
+
+	// Then check CodeIgniter 4
+	res, fw = checkCI4(filePath)
+	if res != ResultUnknown {
+		return res, fw
+	}
+
+	// Then check Yii2
+	res, fw = checkYii2(filePath)
+	if res != ResultUnknown {
+		return res, fw
+	}
+
+	return ResultUnknown, ""
+}
+
+func checkWordPress(filePath string) (CheckResult, string) {
 	root, version := getWPRoot(filePath)
 	if root == "" || version == "" {
 		return ResultUnknown, ""
@@ -170,4 +202,90 @@ func CheckCoreFile(filePath string) (CheckResult, string) {
 		return ResultMatch, "WordPress"
 	}
 	return ResultModified, "WordPress"
+}
+
+func getFrameworkRoot(filePath, indicatorFile, framework string) string {
+	dir := filepath.Dir(filePath)
+
+	cacheKey := framework + ":" + dir
+	frameworkRootsMu.RLock()
+	cachedRoot, cached := frameworkRoots[cacheKey]
+	frameworkRootsMu.RUnlock()
+
+	if cached {
+		return cachedRoot
+	}
+
+	currentDir := dir
+	var root string
+
+	for {
+		if _, err := os.Stat(filepath.Join(currentDir, indicatorFile)); err == nil {
+			root = currentDir
+			break
+		}
+		parent := filepath.Dir(currentDir)
+		if parent == currentDir {
+			break
+		}
+		currentDir = parent
+	}
+
+	frameworkRootsMu.Lock()
+	frameworkRoots[cacheKey] = root
+	frameworkRootsMu.Unlock()
+
+	return root
+}
+
+func checkVendorFile(filePath, root string) CheckResult {
+	relPath, err := filepath.Rel(root, filePath)
+	if err != nil {
+		return ResultUnknown
+	}
+	relPath = filepath.ToSlash(relPath)
+
+	if strings.HasPrefix(relPath, "vendor/") {
+		return ResultMatch
+	}
+	return ResultUnknown
+}
+
+func checkLaravel(filePath string) (CheckResult, string) {
+	root := getFrameworkRoot(filePath, "artisan", "laravel")
+	if root == "" {
+		return ResultUnknown, ""
+	}
+
+	if checkVendorFile(filePath, root) == ResultMatch {
+		return ResultMatch, "Laravel Vendor"
+	}
+	return ResultUnknown, ""
+}
+
+func checkCI4(filePath string) (CheckResult, string) {
+	root := getFrameworkRoot(filePath, "spark", "ci4")
+	if root == "" {
+		return ResultUnknown, ""
+	}
+
+	relPath, _ := filepath.Rel(root, filePath)
+	relPath = filepath.ToSlash(relPath)
+
+	if strings.HasPrefix(relPath, "vendor/") || strings.HasPrefix(relPath, "system/") {
+		return ResultMatch, "CodeIgniter4 Core/Vendor"
+	}
+	return ResultUnknown, ""
+}
+
+func checkYii2(filePath string) (CheckResult, string) {
+	root := getFrameworkRoot(filePath, "yii", "yii2")
+	if root == "" {
+		return ResultUnknown, ""
+	}
+
+	if checkVendorFile(filePath, root) == ResultMatch {
+		return ResultMatch, "Yii2 Vendor"
+	}
+	return ResultUnknown, ""
 }
