@@ -259,7 +259,7 @@ func shouldScanFile(path string) bool {
 	if err != nil {
 		return false
 	}
-	
+
 	// Skip files larger than 50MB to prevent OOM
 	if info.Size() > 50*1024*1024 {
 		return false
@@ -450,7 +450,9 @@ func analyzeReader(filename string, reader io.Reader, cfg models.ScanConfig) (*m
 	indicators := scanIndicators{}
 	lineNumber := 0
 
-	isSourceCode := !strings.HasSuffix(strings.ToLower(filename), ".js") && !strings.HasSuffix(strings.ToLower(filename), ".json") && !strings.HasSuffix(strings.ToLower(filename), ".css")
+	ext := strings.ToLower(filepath.Ext(filename))
+	_, isSuspiciousExt := config.SuspiciousExtensions[ext]
+	isSourceCode := isSuspiciousExt || (!strings.HasSuffix(ext, ".js") && !strings.HasSuffix(ext, ".json") && !strings.HasSuffix(ext, ".css") && !strings.HasSuffix(ext, ".map") && !strings.HasSuffix(ext, ".svg") && !strings.HasSuffix(ext, ".md") && !strings.HasSuffix(ext, ".txt") && !strings.HasSuffix(ext, ".csv") && !strings.HasSuffix(ext, ".log") && !strings.HasSuffix(ext, ".sql") && !strings.HasSuffix(ext, ".xml") && !strings.HasSuffix(ext, ".yml") && !strings.HasSuffix(ext, ".yaml") && !strings.HasSuffix(ext, ".ini") && !strings.HasSuffix(ext, ".lock") && !strings.HasSuffix(ext, ".sum"))
 
 	for scanner.Scan() {
 		lineNumber++
@@ -487,6 +489,10 @@ func analyzeReader(filename string, reader io.Reader, cfg models.ScanConfig) (*m
 			if !strings.Contains(lowerLine, keyword.Word) {
 				continue
 			}
+			// Skip generic low-weight keywords on safe files to prevent false positives
+			if !isSuspiciousExt && keyword.Weight < 5 {
+				continue
+			}
 			key := "keyword:" + keyword.Word
 			if _, exists := seen[key]; exists {
 				continue
@@ -504,6 +510,10 @@ func analyzeReader(filename string, reader io.Reader, cfg models.ScanConfig) (*m
 
 		for _, rule := range cfg.Rules {
 			if !rule.Pattern.MatchString(line) {
+				continue
+			}
+			// Skip generic low-weight rules on safe files to prevent false positives
+			if !isSuspiciousExt && rule.Weight < 4 {
 				continue
 			}
 			key := "rule:" + rule.Name
@@ -570,28 +580,25 @@ func analyzeBinaryReader(filename string, reader io.Reader, cfg models.ScanConfi
 	packerHits := 0
 
 	networkAPIs := []string{
-		"wsastartup", "ws2_32", "wininet", "winhttp", "internetopen", "internetconnect", "httpopenrequest", "winhttpreceive", "winhttpsend",
-		"socket", "connect", "recv", "send", "getaddrinfo", "gethostbyname", "dnsquery", "libcurl", "curl_easy", "curl_multi",
-		"cfnetwork", "nsurlsession", "urlsession", "cfsocket", "scnetworkreachability",
-		"net/http", "httpclient", "user-agent", "content-type", "authorization:",
+		"wininet", "winhttp", "internetopen", "internetconnect", "httpopenrequest", "winhttpreceive", "winhttpsend",
+		"curl_multi", "cfnetwork", "nsurlsession", "cfsocket", "scnetworkreachability",
 	}
 
 	c2Markers := []string{
 		"mythic", "apollo", "poseidon", "beacon", "callback", "tasking", "c2", "agent", "implant",
-		"sliver", "metasploit", "empire", "cobalt strike", "havoc", "bruteratel",
+		"sliver", "metasploit", "empire", "cobalt strike", "havoc", "bruteratel", "meterpreter",
 	}
 
 	injectMarkers := []string{
-		"virtualalloc", "virtualprotect", "writeprocessmemory", "createremotethread", "ntcreatethreadex", "queueuserapc",
-		"rtlmovememory", "loadlibrary", "getprocaddress", "ntdll.dll",
+		"writeprocessmemory", "createremotethread", "ntcreatethreadex", "queueuserapc", "rtlcreateuserthread",
 	}
 
 	persistMarkers := []string{
-		"schtasks", "reg add", "run\\", "runonce", "startup", "launchctl", "launchagents", "launchdaemons", "systemctl", "crontab", "rc.local",
+		"schtasks", "reg add", "runonce", "launchagents", "launchdaemons", "crontab -e", "rc.local",
 	}
 
 	packerMarkers := []string{
-		"upx!", "themida", "vmprotect", "mpress", "aspack",
+		"upx!", "themida", "vmprotect", "mpress", "aspack", "enigma",
 	}
 
 	current := make([]byte, 0, 256)
@@ -607,37 +614,13 @@ func analyzeBinaryReader(filename string, reader io.Reader, cfg models.ScanConfi
 			return
 		}
 
-		for _, keyword := range cfg.Keywords {
-			if strings.Contains(s, keyword.Word) {
-				key := "bin:kw:" + keyword.Word
-				if _, ok := seen[key]; !ok {
-					seen[key] = struct{}{}
-					score += keyword.Weight
-					evidences = append(evidences, models.ShellEvidence{
-						Kind:       "keyword",
-						Name:       keyword.Word,
-						Weight:     keyword.Weight,
-						LineNumber: 0,
-						Matched:    utils.ShortenEvidence(s),
-					})
-				}
-			}
-		}
-
 		for _, needle := range networkAPIs {
 			if strings.Contains(s, needle) {
 				key := "bin:net:" + needle
 				if _, ok := seen[key]; !ok {
 					seen[key] = struct{}{}
-					score += 3
 					networkAPIHits++
-					evidences = append(evidences, models.ShellEvidence{
-						Kind:       "binary",
-						Name:       "network indicator",
-						Weight:     3,
-						LineNumber: 0,
-						Matched:    needle,
-					})
+					// Do not add raw score for basic networking APIs
 				}
 			}
 		}
@@ -647,12 +630,12 @@ func analyzeBinaryReader(filename string, reader io.Reader, cfg models.ScanConfi
 				key := "bin:c2:" + needle
 				if _, ok := seen[key]; !ok {
 					seen[key] = struct{}{}
-					score += 4
+					score += 5
 					c2Hits++
 					evidences = append(evidences, models.ShellEvidence{
 						Kind:       "binary",
 						Name:       "c2 marker",
-						Weight:     4,
+						Weight:     5,
 						LineNumber: 0,
 						Matched:    needle,
 					})
@@ -665,15 +648,8 @@ func analyzeBinaryReader(filename string, reader io.Reader, cfg models.ScanConfi
 				key := "bin:inj:" + needle
 				if _, ok := seen[key]; !ok {
 					seen[key] = struct{}{}
-					score += 5
 					injectHits++
-					evidences = append(evidences, models.ShellEvidence{
-						Kind:       "binary",
-						Name:       "process injection indicator",
-						Weight:     5,
-						LineNumber: 0,
-						Matched:    needle,
-					})
+					// Do not add raw score for basic APIs
 				}
 			}
 		}
@@ -683,15 +659,8 @@ func analyzeBinaryReader(filename string, reader io.Reader, cfg models.ScanConfi
 				key := "bin:pers:" + needle
 				if _, ok := seen[key]; !ok {
 					seen[key] = struct{}{}
-					score += 4
 					persistHits++
-					evidences = append(evidences, models.ShellEvidence{
-						Kind:       "binary",
-						Name:       "persistence indicator",
-						Weight:     4,
-						LineNumber: 0,
-						Matched:    needle,
-					})
+					// Do not add raw score for basic OS persistence commands
 				}
 			}
 		}
@@ -701,12 +670,12 @@ func analyzeBinaryReader(filename string, reader io.Reader, cfg models.ScanConfi
 				key := "bin:pack:" + needle
 				if _, ok := seen[key]; !ok {
 					seen[key] = struct{}{}
-					score += 3
+					score += 1
 					packerHits++
 					evidences = append(evidences, models.ShellEvidence{
 						Kind:       "binary",
 						Name:       "packer indicator",
-						Weight:     3,
+						Weight:     1,
 						LineNumber: 0,
 						Matched:    needle,
 					})
@@ -718,29 +687,13 @@ func analyzeBinaryReader(filename string, reader io.Reader, cfg models.ScanConfi
 			key := "bin:url:" + s
 			if _, ok := seen[key]; !ok {
 				seen[key] = struct{}{}
-				score += 2
 				urlHits++
-				evidences = append(evidences, models.ShellEvidence{
-					Kind:       "binary",
-					Name:       "suspicious url",
-					Weight:     2,
-					LineNumber: 0,
-					Matched:    utils.ShortenEvidence(s),
-				})
 			}
 		} else if binaryIPPortRx.MatchString(s) {
 			key := "bin:ipport:" + s
 			if _, ok := seen[key]; !ok {
 				seen[key] = struct{}{}
-				score += 2
 				ipPortHits++
-				evidences = append(evidences, models.ShellEvidence{
-					Kind:       "binary",
-					Name:       "hardcoded ip:port",
-					Weight:     2,
-					LineNumber: 0,
-					Matched:    s,
-				})
 			}
 		} else if binaryDomainRx.MatchString(s) {
 			key := "bin:domain:" + s
@@ -770,45 +723,45 @@ func analyzeBinaryReader(filename string, reader io.Reader, cfg models.ScanConfi
 	}
 	flush()
 
-	if networkAPIHits > 0 && (urlHits > 0 || ipPortHits > 0 || domainHits > 5) {
+	if networkAPIHits > 2 && (urlHits > 0 || ipPortHits > 0 || domainHits > 5) {
 		key := "bin:heur:net"
 		if _, ok := seen[key]; !ok {
 			seen[key] = struct{}{}
-			score += 5
+			score += 3
 			evidences = append(evidences, models.ShellEvidence{
 				Kind:       "heuristic",
 				Name:       "binary contains networking indicators typical for C2/backdoor",
-				Weight:     5,
+				Weight:     3,
 				LineNumber: 0,
 				Matched:    "Networking APIs combined with hardcoded endpoints or domains.",
 			})
 		}
 	}
 
-	if (injectHits > 0 || persistHits > 0) && networkAPIHits > 0 {
+	if (injectHits > 0 || persistHits > 0) && networkAPIHits > 2 {
 		key := "bin:heur:beh"
 		if _, ok := seen[key]; !ok {
 			seen[key] = struct{}{}
-			score += 5
+			score += 3
 			evidences = append(evidences, models.ShellEvidence{
 				Kind:       "heuristic",
 				Name:       "binary contains malware-like behavior indicators",
-				Weight:     5,
+				Weight:     3,
 				LineNumber: 0,
 				Matched:    "Network indicators combined with persistence or injection markers.",
 			})
 		}
 	}
 
-	if packerHits > 0 && networkAPIHits > 0 {
+	if packerHits > 0 && networkAPIHits > 1 {
 		key := "bin:heur:pack"
 		if _, ok := seen[key]; !ok {
 			seen[key] = struct{}{}
-			score += 3
+			score += 2
 			evidences = append(evidences, models.ShellEvidence{
 				Kind:       "heuristic",
 				Name:       "packed binary with networking indicators",
-				Weight:     3,
+				Weight:     2,
 				LineNumber: 0,
 				Matched:    "Packer strings combined with networking-related strings.",
 			})
