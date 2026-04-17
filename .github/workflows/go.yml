@@ -87,7 +87,7 @@ jobs:
           go build \
             -trimpath \
             -ldflags="-s -w" \
-            -o "package/${BINARY_NAME}" .
+            -o "package/${BINARY_NAME}" ./cmd/worldshellfinder
 
           cp LICENSE package/
           cp readme.md package/
