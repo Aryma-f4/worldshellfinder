@@ -115,6 +115,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
@@ -132,10 +135,16 @@ jobs:
         id: meta
         run: |
           set -euo pipefail
-          SAFE_BRANCH="${GITHUB_REF_NAME//\//-}"
-          SHORT_SHA="${GITHUB_SHA::7}"
-          TAG="auto-${SAFE_BRANCH}-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}-${SHORT_SHA}"
-          NAME="Auto Release ${GITHUB_REF_NAME} #${GITHUB_RUN_NUMBER} (${SHORT_SHA})"
+          # Extract version from config
+          APP_VERSION=$(grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' internal/config/config.go | head -n 1)
+          if [ -z "$APP_VERSION" ]; then APP_VERSION="v0.0.0"; fi
+          
+          # Delete existing tag locally and remotely if it exists to allow re-release
+          git push --delete origin "$APP_VERSION" || true
+          git tag -d "$APP_VERSION" || true
+
+          TAG="$APP_VERSION"
+          NAME="WorldShellFinder $APP_VERSION"
           echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
           echo "name=${NAME}" >> "${GITHUB_OUTPUT}"
 
@@ -149,7 +158,8 @@ jobs:
           make_latest: true
           generate_release_notes: true
           body: |
-            Automated release created from `${{ github.ref_name }}`.
+            ### Changelog
+            Automated release for **WorldShellFinder ${{ steps.meta.outputs.tag }}**
 
             Commit: `${{ github.sha }}`
             Workflow run: `${{ github.run_number }}`

@@ -86,9 +86,9 @@ graph TD
     end
 
     H1 --> I{Core File Integrity}
-    I -->|Match Known Framework Vendor/Core| L[Safe / Skip File]
-    I -->|Modified Checksum (WP)| J1[Add +20 Score]
-    I -->|Not a Core File| J2{File Type Check}
+    I -->|"Match Known Framework Vendor/Core"| L[Safe / Skip File]
+    I -->|"Modified Checksum (WP)"| J1["Add +20 Score"]
+    I -->|"Not a Core File"| J2{File Type Check}
 
     J1 --> J2
     
