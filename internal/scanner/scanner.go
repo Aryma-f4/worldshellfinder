@@ -136,8 +136,8 @@ func BuildDetectionRules() ([]models.DetectionRule, error) {
 		{"asp request eval", `(?i)(?:Execute|Eval)\s*\(\s*Request\.(?:Form|QueryString|Item)`, 5},
 		{"process builder command", `(?i)ProcessBuilder\s*\(\s*(?:new\s+String\[\]|["'])`, 4},
 		{"halt compiler payload", `(?i)__halt_compiler\s*\(`, 4},
-		{"command parameter", `(?i)\$_(?:GET|POST|REQUEST)\s*\[\s*['"](?:cmd|exec|shell|command|payload)['"]\s*\]`, 3},
-		{"upload form marker", `(?i)(?:multipart/form-data|type\s*=\s*["']file["'])`, 2},
+		{"command parameter", `(?i)\$_(?:GET|POST|REQUEST)\s*\[\s*['"](?:cmd|exec|shell|payload)['"]\s*\]`, 2},
+		{"upload form marker", `(?i)(?:multipart/form-data|type\s*=\s*["']file["'])`, 1},
 	}
 
 	rules := make([]models.DetectionRule, 0, len(ruleDefs))
@@ -330,8 +330,11 @@ func analyzeFile(filename string, cfg models.ScanConfig) (*models.ShellDetection
 		}
 
 		// Skip files inside vendor or node_modules entirely to eliminate third-party library false positives
-		if strings.Contains(filepath.ToSlash(filename), "/vendor/") || strings.Contains(filepath.ToSlash(filename), "/node_modules/") {
-			return nil, nil
+		// unless they were explicitly flagged as modified by the integrity checker
+		if coreResult != integrity.ResultModified {
+			if strings.Contains(filepath.ToSlash(filename), "/vendor/") || strings.Contains(filepath.ToSlash(filename), "/node_modules/") {
+				return nil, nil
+			}
 		}
 
 		file, err := os.Open(filename)
@@ -636,7 +639,7 @@ func analyzeReader(filename string, reader io.Reader, cfg models.ScanConfig) (*m
 		return nil, err
 	}
 
-	score, evidences = addHeuristicEvidence(score, evidences, indicators, seen)
+	score, evidences = addHeuristicEvidence(score, evidences, indicators, seen, isSuspiciousExt)
 	applyVirusTotal(cfg.VTApiKey, filename, &score, &evidences)
 
 	return &models.ShellDetection{
@@ -878,7 +881,7 @@ func analyzeBinaryReader(filename string, reader io.Reader, cfg models.ScanConfi
 	}, nil
 }
 
-func addHeuristicEvidence(score int, evidences []models.ShellEvidence, indicators scanIndicators, seen map[string]struct{}) (int, []models.ShellEvidence) {
+func addHeuristicEvidence(score int, evidences []models.ShellEvidence, indicators scanIndicators, seen map[string]struct{}, isSuspiciousExt bool) (int, []models.ShellEvidence) {
 	type heuristic struct {
 		key     string
 		name    string
@@ -891,28 +894,28 @@ func addHeuristicEvidence(score int, evidences []models.ShellEvidence, indicator
 		{
 			key:     "heuristic:user-input-exec",
 			name:    "user input combined with command execution",
-			weight:  3,
+			weight:  2,
 			matched: "File combines request variables with command execution primitives.",
 			enabled: indicators.hasUserInput && indicators.commandExecHits > 0,
 		},
 		{
 			key:     "heuristic:obfuscated-exec",
 			name:    "obfuscation combined with execution",
-			weight:  3,
+			weight:  2,
 			matched: "File combines obfuscation helpers with execution functions.",
 			enabled: indicators.obfuscationHits > 0 && indicators.commandExecHits > 0,
 		},
 		{
 			key:     "heuristic:upload-dropper",
 			name:    "upload flow combined with file write",
-			weight:  3,
+			weight:  2,
 			matched: "File mixes upload handling with file creation or overwrite functions.",
 			enabled: indicators.uploadHits > 0 && indicators.fileWriteHits > 0,
 		},
 		{
 			key:     "heuristic:shell-ui",
 			name:    "interactive shell markers",
-			weight:  3,
+			weight:  2,
 			matched: "File contains shell-like UI markers plus execution-related code.",
 			enabled: indicators.shellMarkerHits > 0 && indicators.commandExecHits > 0,
 		},
@@ -920,6 +923,9 @@ func addHeuristicEvidence(score int, evidences []models.ShellEvidence, indicator
 
 	for _, item := range heuristics {
 		if !item.enabled {
+			continue
+		}
+		if !isSuspiciousExt && item.weight < 4 {
 			continue
 		}
 		if _, exists := seen[item.key]; exists {
@@ -946,7 +952,7 @@ func updateIndicators(line string, indicators *scanIndicators) {
 	if utils.ContainsAny(line, "system(", "exec(", "shell_exec(", "passthru(", "popen(", "proc_open(", "runtime.getruntime().exec", "processbuilder(") {
 		indicators.commandExecHits++
 	}
-	if utils.ContainsAny(line, "base64_decode(", "gzinflate(", "gzuncompress(", "str_rot13(", "urldecode(", "rawurldecode(", "strrev(", "fromcharcode(", "base64.b64decode(") {
+	if utils.ContainsAny(line, "base64_decode(", "gzinflate(", "gzuncompress(", "str_rot13(", "strrev(", "fromcharcode(", "base64.b64decode(") {
 		indicators.obfuscationHits++
 	}
 	if utils.ContainsAny(line, "move_uploaded_file(", "$_files[", "multipart/form-data", "type=\"file\"", "type='file'") {
@@ -955,7 +961,7 @@ func updateIndicators(line string, indicators *scanIndicators) {
 	if utils.ContainsAny(line, "file_put_contents(", "fopen(", "fwrite(", "copy(", "chmod(", "touch(", "move_uploaded_file(") {
 		indicators.fileWriteHits++
 	}
-	if utils.ContainsAny(line, "cmd", "shell", "terminal", "upload", "file manager", "wso", "b374k", "c99") {
+	if utils.ContainsAny(line, "webshell", "web shell", "terminal", "file manager", "wso", "b374k", "c99", "r57") {
 		indicators.shellMarkerHits++
 	}
 }

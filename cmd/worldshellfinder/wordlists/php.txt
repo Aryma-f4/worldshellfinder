@@ -14,11 +14,9 @@ create_function::4
 __halt_compiler::4
 
 # Common PHP Backdoor Droppers
-move_uploaded_file::2
-$_FILES['::1
-multipart/form-data::1
+move_uploaded_file::1
 fopen("php://input"::4
-file_put_contents::2
+file_put_contents::1
 
 # PHP execution
 shell_exec::4

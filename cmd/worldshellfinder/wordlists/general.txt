@@ -17,8 +17,6 @@ $in{$key} .= $val;}if($in{"cmd"}){print decode_base64($in{"check"})."<pre>";syst
 /proc/cpuinfo::1
 tasklist::1
 systeminfo::1
-whoami::1
-id::1
 ipconfig::1
 elFinder.class.php::1
 elFinderVolumeDriver.class.php::1

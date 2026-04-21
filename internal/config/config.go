@@ -69,7 +69,6 @@ var IgnoredExtensions = map[string]struct{}{
 	".db":          {},
 	".pem":         {},
 	".css":         {},
-	".js":          {},
 	".txt":         {},
 	".eot":         {},
 	".woff":        {},
