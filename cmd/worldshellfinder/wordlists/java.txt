@@ -1,0 +1,8 @@
+# Java / JSP Shells
+Runtime.getRuntime().exec::4
+ProcessBuilder::2
+java.lang.Process::2
+java.lang.Runtime::2
+java.lang.reflect.Method.invoke::2
+java.util.Scanner::1
+<pre>#{ view.getClass().getClassLoader().loadClass("java.util.Scanner").getMethod("next").invoke(::6

@@ -35,45 +35,65 @@ type scanIndicators struct {
 	shellMarkerHits int
 }
 
-func LoadKeywords(wordlistPath string, defaultWordlist embed.FS) ([]models.KeywordRule, error) {
-	file, err := defaultWordlist.Open("wordlists/default.txt")
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-	keywords, err := scanKeywordReader(file)
-	if err != nil {
-		return nil, err
+func LoadKeywords(wordlistPath string, defaultWordlists embed.FS) ([]models.KeywordRule, map[string][]models.KeywordRule, error) {
+	general := []models.KeywordRule{}
+	byExt := make(map[string][]models.KeywordRule)
+
+	entries, err := defaultWordlists.ReadDir("wordlists")
+	if err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			name := entry.Name()
+			file, err := defaultWordlists.Open("wordlists/" + name)
+			if err != nil {
+				continue
+			}
+			kws, _ := scanKeywordReader(file)
+			file.Close()
+
+			cat := strings.TrimSuffix(name, filepath.Ext(name))
+			if cat == "general" || cat == "default" {
+				general = append(general, kws...)
+			} else {
+				byExt[cat] = append(byExt[cat], kws...)
+			}
+		}
 	}
 
 	if wordlistPath != "" {
 		file2, err := os.Open(wordlistPath)
-		if err != nil {
-			return nil, err
+		if err == nil {
+			extra, _ := scanKeywordReader(file2)
+			file2.Close()
+			general = append(general, extra...)
 		}
-		defer file2.Close()
-		extra, err := scanKeywordReader(file2)
-		if err != nil {
-			return nil, err
-		}
-		keywords = append(keywords, extra...)
 	}
 
-	seen := make(map[string]struct{}, len(keywords))
-	var deduped []models.KeywordRule
-	for _, keyword := range keywords {
-		normalized := strings.ToLower(strings.TrimSpace(keyword.Word))
-		if normalized == "" {
-			continue
+	dedup := func(keywords []models.KeywordRule) []models.KeywordRule {
+		seen := make(map[string]struct{}, len(keywords))
+		var deduped []models.KeywordRule
+		for _, keyword := range keywords {
+			normalized := strings.ToLower(strings.TrimSpace(keyword.Word))
+			if normalized == "" {
+				continue
+			}
+			if _, exists := seen[normalized]; exists {
+				continue
+			}
+			seen[normalized] = struct{}{}
+			deduped = append(deduped, models.KeywordRule{Word: normalized, Weight: keyword.Weight})
 		}
-		if _, exists := seen[normalized]; exists {
-			continue
-		}
-		seen[normalized] = struct{}{}
-		deduped = append(deduped, models.KeywordRule{Word: normalized, Weight: keyword.Weight})
+		return deduped
 	}
 
-	return deduped, nil
+	general = dedup(general)
+	for k, v := range byExt {
+		byExt[k] = dedup(v)
+	}
+
+	return general, byExt, nil
 }
 
 func scanKeywordReader(r io.Reader) ([]models.KeywordRule, error) {
@@ -136,7 +156,7 @@ func BuildDetectionRules() ([]models.DetectionRule, error) {
 }
 
 func BuildScanConfig(wordlistPath string, minScore, maxEvidence int, vtApiKey string, defaultWordlist embed.FS) (models.ScanConfig, error) {
-	keywords, err := LoadKeywords(wordlistPath, defaultWordlist)
+	general, byExt, err := LoadKeywords(wordlistPath, defaultWordlist)
 	if err != nil {
 		return models.ScanConfig{}, fmt.Errorf("fail to load keywords: %w", err)
 	}
@@ -147,11 +167,12 @@ func BuildScanConfig(wordlistPath string, minScore, maxEvidence int, vtApiKey st
 	}
 
 	return models.ScanConfig{
-		Keywords:    keywords,
-		Rules:       rules,
-		MinScore:    minScore,
-		MaxEvidence: maxEvidence,
-		VTApiKey:    vtApiKey,
+		GeneralKeywords: general,
+		ExtKeywords:     byExt,
+		Rules:           rules,
+		MinScore:        minScore,
+		MaxEvidence:     maxEvidence,
+		VTApiKey:        vtApiKey,
 	}, nil
 }
 
@@ -459,6 +480,13 @@ func analyzeReader(filename string, reader io.Reader, cfg models.ScanConfig) (*m
 	_, isSuspiciousExt := config.SuspiciousExtensions[ext]
 	isSourceCode := isSuspiciousExt || (!strings.HasSuffix(ext, ".js") && !strings.HasSuffix(ext, ".json") && !strings.HasSuffix(ext, ".css") && !strings.HasSuffix(ext, ".map") && !strings.HasSuffix(ext, ".svg") && !strings.HasSuffix(ext, ".md") && !strings.HasSuffix(ext, ".txt") && !strings.HasSuffix(ext, ".csv") && !strings.HasSuffix(ext, ".log") && !strings.HasSuffix(ext, ".sql") && !strings.HasSuffix(ext, ".xml") && !strings.HasSuffix(ext, ".yml") && !strings.HasSuffix(ext, ".yaml") && !strings.HasSuffix(ext, ".ini") && !strings.HasSuffix(ext, ".lock") && !strings.HasSuffix(ext, ".sum"))
 
+	cat := config.ExtCategory[ext]
+	var activeKeywords []models.KeywordRule
+	activeKeywords = append(activeKeywords, cfg.GeneralKeywords...)
+	if cat != "" {
+		activeKeywords = append(activeKeywords, cfg.ExtKeywords[cat]...)
+	}
+
 	for scanner.Scan() {
 		lineNumber++
 		line := scanner.Text()
@@ -490,7 +518,7 @@ func analyzeReader(filename string, reader io.Reader, cfg models.ScanConfig) (*m
 			}
 		}
 
-		for _, keyword := range cfg.Keywords {
+		for _, keyword := range activeKeywords {
 			if !strings.Contains(lowerLine, keyword.Word) {
 				continue
 			}

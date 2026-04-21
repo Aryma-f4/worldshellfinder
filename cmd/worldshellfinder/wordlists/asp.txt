@@ -1,0 +1,8 @@
+# ASP / ASPX Shells
+Request.Item::2
+Request.Form::1
+Request.QueryString::1
+Server.CreateObject("WScript.Shell")::5
+System.Diagnostics.Process.Start::3
+eval(Request.Item::5
+<%=Request.Servervariables("::3

@@ -1,0 +1,8 @@
+# Python / Ruby Reverse Shells
+pty.spawn::4
+subprocess.Popen::2
+os.dup2::3
+child_stdin, child_stdout = os.popen2(base64.b64decode(cmd))::5
+TCPSocket.new::3
+net.Dial::2
+os/exec.Command::2

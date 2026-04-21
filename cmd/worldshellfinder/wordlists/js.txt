@@ -1,0 +1,11 @@
+# Node.js / JS Reverse Shells & Obfuscation
+child_process.exec::2
+net.Socket::2
+eval(String.fromCharCode::4
+FromCharCode::2
+WScript.Shell::3
+indexBase64[str.charCodeAt(i++)];::4
+ActiveXObject("WScript.Shell").Run(::5
+if (os.platform() == 'win32') {::2
+makeRequest("?feature=shell", {cmd: command, cwd: CWD}, function(response) {::6
+document.forms[0].command.focus();::3

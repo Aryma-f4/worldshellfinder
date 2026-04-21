@@ -35,11 +35,12 @@ type KeywordRule struct {
 }
 
 type ScanConfig struct {
-	Keywords    []KeywordRule
-	Rules       []DetectionRule
-	MinScore    int
-	MaxEvidence int
-	VTApiKey    string
+	GeneralKeywords []KeywordRule
+	ExtKeywords     map[string][]KeywordRule
+	Rules           []DetectionRule
+	MinScore        int
+	MaxEvidence     int
+	VTApiKey        string
 }
 
 type ScanSummary struct {

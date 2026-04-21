@@ -16,7 +16,7 @@ import (
 	"github.com/pterm/pterm"
 )
 
-//go:embed wordlists/default.txt
+//go:embed wordlists/*
 var defaultWordlist embed.FS
 
 var verbose bool

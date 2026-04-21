@@ -42,6 +42,7 @@ This project is intended for educational, incident response, and defensive secur
 The scanner evaluates files using multiple signals:
 
 - Text-based webshell patterns (keyword + regex rules + heuristic scoring).
+- **Language-Specific Wordlists:** Dynamically loads different keyword sets based on the target file extension (e.g. PHP keywords for `.php`, JS/Node keywords for `.js`/`.ts`, Python keywords for `.py`) to completely eliminate cross-language false positives.
 - **YARA-like Advanced Heuristics (Pure Go):**
   - **Shannon Entropy Analysis:** Detects highly obfuscated payloads (like hidden Base64 or Hex blobs) by calculating the mathematical information density of contiguous strings.
   - **Memory-Efficient Binary Streaming:** Parses executable and binary-format files for C2/Backdoor indicators without loading massive files into RAM.

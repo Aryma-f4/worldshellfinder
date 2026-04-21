@@ -33,6 +33,12 @@ var SuspiciousExtensions = map[string]struct{}{
 	".pl":    {},
 	".py":    {},
 	".sh":    {},
+	".js":    {},
+	".ts":    {},
+	".jsx":   {},
+	".tsx":   {},
+	".cjs":   {},
+	".mjs":   {},
 }
 
 var IgnoredExtensions = map[string]struct{}{
@@ -72,6 +78,32 @@ var IgnoredExtensions = map[string]struct{}{
 	".bcmap":       {},
 	".mp3":         {},
 	".mp4":         {},
+}
+
+var ExtCategory = map[string]string{
+	".php":   "php",
+	".phtml": "php",
+	".php3":  "php",
+	".php4":  "php",
+	".php5":  "php",
+	".phar":  "php",
+	".inc":   "php",
+	".js":    "js",
+	".ts":    "js",
+	".jsx":   "js",
+	".tsx":   "js",
+	".cjs":   "js",
+	".mjs":   "js",
+	".jsp":   "java",
+	".jspx":  "java",
+	".asp":   "asp",
+	".aspx":  "asp",
+	".ashx":  "asp",
+	".py":    "python",
+	".sh":    "shell",
+	".bash":  "shell",
+	".pl":    "perl",
+	".cfm":   "cfm",
 }
 
 const Banner = `

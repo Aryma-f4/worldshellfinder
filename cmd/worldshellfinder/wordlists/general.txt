@@ -1,0 +1,76 @@
+# General C2 / Webshell Frameworks
+b374k::6
+wso::6
+c99::6
+r57::6
+gacor::4
+maxwin::4
+<!--#exec cmd=::5
+$in{$key} .= $val;}if($in{"cmd"}){print decode_base64($in{"check"})."<pre>";system(decode_base64($in{"cmd"}));::6
+½QV{ŸÒtÎg¡6¹I¥ó”ÚtÎkYÐI¥º::5
+7ZLRjppAFIZfwCZ9h8mGhCFNseq23Spa1EgQt8aK0S5acGAYbuLsQJhO1nr20TsyZbFqfYBeEJhmvmb+nz9QDgAeCoYEVtkePxMuONSTgn3u5bpu/Gz/rk4OkGOOBdS25DFoSLFEzwBR+yXUykaR3atBWdMwoEAbBS0tGMlUvvG0pcVpWAvHgwuiIRqUwAK6ro7VtCUJKFYop+qFhkQBjVCaUI0mp4RMnYH6GMrFNWktNZvKAahK/kX130VXV1B2Cb56GB/6VwHUptoSfYMoA68KyrEoZQYqtHdc6q+YZVwJeKMHvN55Ln+2st2T7xzjsHvLw+7suPLcXmBG7ntWB7EtXexz3P/paRaTdRNn6RGTdrzb3X2c27Oz740lULPwCcWR/SX2aussmowF9sYvjz03UM4PZmE/n8JWv2sgcDdlvseesy2WL8vzfLrkyxlvC2LeXFruVdhd365vy0VWcJSkIAw4/tTfVBilEYZKz8ag6t0MOcpWJr6VhFJ22UEzzOR9ECL7d5qiJE/gvI3SJ2aUk2bAHGhETUDfhzRgVN0YDM3rhptXMSIYSRHLpP4H9Q9OyZz+Ag==::6
+
+# System enumeration (Lower scores to prevent False Positives)
+/etc/passwd::1
+/etc/shadow::2
+/proc/version::1
+/proc/cpuinfo::1
+tasklist::1
+systeminfo::1
+whoami::1
+id::1
+ipconfig::1
+elFinder.class.php::1
+elFinderVolumeDriver.class.php::1
+class-phpmailer.php::1
+wordfenceClass.php::1
+
+# Privilege Escalation / Persistence
+schtasks::2
+crontab -e::2
+/etc/rc.local::1
+/etc/cron.d::1
+systemctl enable::1
+launchctl load::1
+Set-ItemProperty -Path HKCU:\Software\Microsoft\Windows\CurrentVersion\Run::3
+New-ItemProperty -Path HKLM:\Software\Microsoft\Windows\CurrentVersion\Run::3
+
+# Command Executions
+cmd.exe::3
+/bin/sh::2
+/bin/bash::2
+powershell.exe::2
+
+# Network / Exfiltration
+WinHttpSendRequest::2
+WinHttpOpen::2
+InternetOpenUrl::2
+InternetReadFile::2
+HttpSendRequest::2
+ws2_32.dll::2
+socket(AF_INET,::2
+socket(AF_INET6,::2
+libcurl::2
+net/http.Post::2
+net/http.Get::2
+
+# Injection / Process Abuse
+VirtualAlloc::2
+WriteProcessMemory::3
+CreateRemoteThread::4
+CreateProcess::2
+QueueUserAPC::3
+RtlCreateUserThread::4
+NtCreateThreadEx::4
+
+# Mythic & Specific C2 markers
+mythic::6
+apollo::3
+poseidon::4
+apfell::5
+medusa::5
+sliver::6
+cobaltstrike::7
+beacon::3
+covenant::6
+metasploit::6
