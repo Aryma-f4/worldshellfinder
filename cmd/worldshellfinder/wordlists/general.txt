@@ -1,10 +1,4 @@
 # General C2 / Webshell Frameworks
-b374k::6
-wso::6
-c99::6
-r57::6
-gacor::4
-maxwin::4
 <!--#exec cmd=::5
 $in{$key} .= $val;}if($in{"cmd"}){print decode_base64($in{"check"})."<pre>";system(decode_base64($in{"cmd"}));::6
 ½QV{ŸÒtÎg¡6¹I¥ó”ÚtÎkYÐI¥º::5

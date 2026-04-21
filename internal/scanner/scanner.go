@@ -138,6 +138,7 @@ func BuildDetectionRules() ([]models.DetectionRule, error) {
 		{"halt compiler payload", `(?i)__halt_compiler\s*\(`, 4},
 		{"command parameter", `(?i)\$_(?:GET|POST|REQUEST)\s*\[\s*['"](?:cmd|exec|shell|payload)['"]\s*\]`, 2},
 		{"upload form marker", `(?i)(?:multipart/form-data|type\s*=\s*["']file["'])`, 1},
+		{"known webshell names", `(?i)\b(?:wso|c99|r57|b374k|gacor|maxwin)\b`, 6},
 	}
 
 	rules := make([]models.DetectionRule, 0, len(ruleDefs))
@@ -593,6 +594,28 @@ func analyzeReader(filename string, reader io.Reader, cfg models.ScanConfig) (*m
 			if !strings.Contains(lowerLine, keyword.Word) {
 				continue
 			}
+			// Extremely short keywords (<= 4 chars) need word boundary validation to prevent false positives inside other words
+			if len(keyword.Word) <= 4 {
+				idx := strings.Index(lowerLine, keyword.Word)
+				if idx >= 0 {
+					// Check character before
+					if idx > 0 {
+						c := lowerLine[idx-1]
+						if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') {
+							continue
+						}
+					}
+					// Check character after
+					endIdx := idx + len(keyword.Word)
+					if endIdx < len(lowerLine) {
+						c := lowerLine[endIdx]
+						if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') {
+							continue
+						}
+					}
+				}
+			}
+
 			// Skip generic low-weight keywords on safe files to prevent false positives
 			if !isSuspiciousExt && keyword.Weight < 5 {
 				continue
