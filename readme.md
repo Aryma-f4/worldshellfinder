@@ -45,6 +45,7 @@ The scanner evaluates files using multiple signals:
 - **YARA-like Advanced Heuristics (Pure Go):**
   - **Shannon Entropy Analysis:** Detects highly obfuscated payloads (like hidden Base64 or Hex blobs) by calculating the mathematical information density of contiguous strings.
   - **Memory-Efficient Binary Streaming:** Parses executable and binary-format files for C2/Backdoor indicators without loading massive files into RAM.
+- **Smart Extension Filtering:** Automatically ignores static media files, documents, and fonts (e.g. `.jpg`, `.pdf`, `.zip`, `.woff`) to drastically reduce false positives and speed up the scanning process.
 - **Core File Integrity Verification:** Automatically detects framework installations and verifies core/vendor files. Unmodified files are safely ignored (Zero False Positives), while modified core files are immediately flagged! Supported frameworks:
   - **WordPress** (Full MD5 checksum validation via official API)
   - **Laravel** (Vendor path validation via `artisan` root detection)

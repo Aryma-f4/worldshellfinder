@@ -35,6 +35,45 @@ var SuspiciousExtensions = map[string]struct{}{
 	".sh":    {},
 }
 
+var IgnoredExtensions = map[string]struct{}{
+	".jpg":         {},
+	".jpeg":        {},
+	".png":         {},
+	".gif":         {},
+	".svg":         {},
+	".ico":         {},
+	".webp":        {},
+	".heic":        {},
+	".avif":        {},
+	".tiff":        {},
+	".bimap":       {}, // or .bmp
+	".bmp":         {},
+	".jpg_backup":  {},
+	".jpeg_backup": {},
+	".zip":         {},
+	".tar":         {},
+	".gz":          {},
+	".pdf":         {},
+	".pptx":        {},
+	".ppt":         {},
+	".docx":        {},
+	".xlsx":        {},
+	".csv":         {},
+	".xml":         {},
+	".db":          {},
+	".pem":         {},
+	".css":         {},
+	".js":          {},
+	".txt":         {},
+	".eot":         {},
+	".woff":        {},
+	".woff2":       {},
+	".ttf":         {},
+	".bcmap":       {},
+	".mp3":         {},
+	".mp4":         {},
+}
+
 const Banner = `
 ` + Red + `
 ===========================================================================================

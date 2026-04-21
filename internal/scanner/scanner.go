@@ -251,6 +251,11 @@ var (
 
 func shouldScanFile(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
+
+	if _, ok := config.IgnoredExtensions[ext]; ok {
+		return false
+	}
+
 	if _, ok := config.SuspiciousExtensions[ext]; ok {
 		return true
 	}
