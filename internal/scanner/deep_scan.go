@@ -10,8 +10,8 @@ import (
 	"github.com/pterm/pterm"
 )
 
-func RunDeepScan(directories []string, wordlistPath, outputFile string, minScore, maxEvidence int, vtApiKey string, verbose bool, defaultWordlist embed.FS, numWorkers int) error {
-	cfg, err := BuildScanConfig(wordlistPath, minScore, maxEvidence, vtApiKey, defaultWordlist)
+func RunDeepScan(directories []string, wordlistPath, outputFile string, minScore, maxEvidence int, vtApiKey string, disableIntegrity, verbose bool, defaultWordlist embed.FS, numWorkers int) error {
+	cfg, err := BuildScanConfig(wordlistPath, minScore, maxEvidence, vtApiKey, disableIntegrity, defaultWordlist)
 	if err != nil {
 		return err
 	}

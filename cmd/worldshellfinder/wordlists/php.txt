@@ -62,9 +62,9 @@ if (strpos($_SESSION['currentdir'],str_replace('\\','/',$_SERVER['DOCUMENT_ROOT'
 @set_time_limit(0);@preg_replace("/[email]/e",$_POST['Id'],"error");::5
 @extract($_POST, EXTR_SKIP);::4
 @eval($_POST['::5
-$_GET['cmd']::4
-if($_POST['cmd'])::3
-$_REQUEST['cmd']::4
+$_GET['cmd']::2
+if($_POST['cmd'])::2
+$_REQUEST['cmd']::2
 @fopen($_FILES['::4
 if(isset($_REQUEST['cmd']))::3
 shell_exec(base64_decode(::6

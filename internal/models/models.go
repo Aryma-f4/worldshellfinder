@@ -41,6 +41,7 @@ type ScanConfig struct {
 	MinScore        int
 	MaxEvidence     int
 	VTApiKey        string
+	DisableIntegrity bool
 }
 
 type ScanSummary struct {

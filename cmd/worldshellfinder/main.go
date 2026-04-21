@@ -51,6 +51,7 @@ func main() {
 	helpFlagLong := flag.Bool("help", false, "display help information")
 	updateFlag := flag.Bool("update", false, "update latest version from repository")
 	verboseFlag := flag.Bool("v", false, "enable verbose mode")
+	noIntegrityFlag := flag.Bool("no-integrity", false, "disable core file integrity verification")
 	modeFlag := flag.String("mode", "", "operation mode: detect, deep, or remove")
 	dirFlag := flag.String("dir", "", "directory to scan")
 	dirListFlag := flag.String("dir-list", "", "file containing a list of directories to scan (one per line)")
@@ -112,11 +113,11 @@ func main() {
 		}
 		switch mode {
 		case "detect":
-			if err := scanner.RunDetection(directories, wordlistPath, outputFile, *minScoreFlag, *maxEvidenceFlag, vtApiKey, verbose, defaultWordlist, *workersFlag); err != nil {
+			if err := scanner.RunDetection(directories, wordlistPath, outputFile, *minScoreFlag, *maxEvidenceFlag, vtApiKey, *noIntegrityFlag, verbose, defaultWordlist, *workersFlag); err != nil {
 				pterm.Fatal.Printf("Detection failed: %v\n", err)
 			}
 		case "deep":
-			if err := scanner.RunDeepScan(directories, wordlistPath, outputFile, *minScoreFlag, *maxEvidenceFlag, vtApiKey, verbose, defaultWordlist, *workersFlag); err != nil {
+			if err := scanner.RunDeepScan(directories, wordlistPath, outputFile, *minScoreFlag, *maxEvidenceFlag, vtApiKey, *noIntegrityFlag, verbose, defaultWordlist, *workersFlag); err != nil {
 				pterm.Fatal.Printf("Deep scan failed: %v\n", err)
 			}
 		case "remove":
@@ -162,7 +163,7 @@ func main() {
 			vtApiKey, _ = pterm.DefaultInteractiveTextInput.Show("Enter VirusTotal API Key (press Enter to skip)")
 			vtApiKey = strings.TrimSpace(vtApiKey)
 		}
-		err := scanner.RunDetection([]string{directory}, wordlistPath, outputFile, *minScoreFlag, *maxEvidenceFlag, vtApiKey, verbose, defaultWordlist, *workersFlag)
+		err := scanner.RunDetection([]string{directory}, wordlistPath, outputFile, *minScoreFlag, *maxEvidenceFlag, vtApiKey, *noIntegrityFlag, verbose, defaultWordlist, *workersFlag)
 		if err != nil {
 			pterm.Fatal.Printf("Detection failed: %v\n", err)
 		}
@@ -180,7 +181,7 @@ func main() {
 			vtApiKey, _ = pterm.DefaultInteractiveTextInput.Show("Enter VirusTotal API Key (press Enter to skip)")
 			vtApiKey = strings.TrimSpace(vtApiKey)
 		}
-		err := scanner.RunDeepScan([]string{directory}, wordlistPath, outputFile, *minScoreFlag, *maxEvidenceFlag, vtApiKey, verbose, defaultWordlist, *workersFlag)
+		err := scanner.RunDeepScan([]string{directory}, wordlistPath, outputFile, *minScoreFlag, *maxEvidenceFlag, vtApiKey, *noIntegrityFlag, verbose, defaultWordlist, *workersFlag)
 		if err != nil {
 			pterm.Fatal.Printf("Deep scan failed: %v\n", err)
 		}
@@ -212,5 +213,6 @@ func printHelp() {
 	fmt.Println("  -remove-string string   String to remove when mode=remove")
 	fmt.Println("  -vt-api-key string      VirusTotal API key for checking suspicious files")
 	fmt.Println("  -workers int            Number of concurrent workers for scanning files (default: number of CPUs)")
+	fmt.Println("  -no-integrity           Disable Core File Integrity Verification (skip API checksum checks)")
 	fmt.Println("  --update                Update to the latest release")
 }

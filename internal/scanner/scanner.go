@@ -125,6 +125,7 @@ func BuildDetectionRules() ([]models.DetectionRule, error) {
 		pattern string
 		weight  int
 	}{
+		{"classic one-liner webshell", `(?i)<\?(?:php)?\s*(?:@)?(?:system|exec|shell_exec|passthru|popen|proc_open|eval|assert)\s*\(\s*\$_(?:GET|POST|REQUEST|COOKIE)\s*\[.+?\]\s*\)\s*;?\s*\?>`, 10},
 		{"user controlled command execution", `(?i)(?:system|exec|shell_exec|passthru|popen|proc_open|assert)\s*\(\s*\$_(?:GET|POST|REQUEST|COOKIE|SERVER|FILES)\s*\[`, 5},
 		{"obfuscated eval chain", `(?i)(?:eval|assert)\s*\(\s*(?:base64_decode|gzinflate|gzuncompress|str_rot13|rawurldecode|urldecode|strrev)\s*\(`, 5},
 		{"encoded payload execution", `(?i)(?:eval|assert|system|exec|shell_exec|passthru)\s*\(\s*["'][A-Za-z0-9+/=]{40,}["']\s*\)`, 5},
@@ -155,7 +156,7 @@ func BuildDetectionRules() ([]models.DetectionRule, error) {
 	return rules, nil
 }
 
-func BuildScanConfig(wordlistPath string, minScore, maxEvidence int, vtApiKey string, defaultWordlist embed.FS) (models.ScanConfig, error) {
+func BuildScanConfig(wordlistPath string, minScore, maxEvidence int, vtApiKey string, disableIntegrity bool, defaultWordlist embed.FS) (models.ScanConfig, error) {
 	general, byExt, err := LoadKeywords(wordlistPath, defaultWordlist)
 	if err != nil {
 		return models.ScanConfig{}, fmt.Errorf("fail to load keywords: %w", err)
@@ -167,12 +168,13 @@ func BuildScanConfig(wordlistPath string, minScore, maxEvidence int, vtApiKey st
 	}
 
 	return models.ScanConfig{
-		GeneralKeywords: general,
-		ExtKeywords:     byExt,
-		Rules:           rules,
-		MinScore:        minScore,
-		MaxEvidence:     maxEvidence,
-		VTApiKey:        vtApiKey,
+		GeneralKeywords:  general,
+		ExtKeywords:      byExt,
+		Rules:            rules,
+		MinScore:         minScore,
+		MaxEvidence:      maxEvidence,
+		VTApiKey:         vtApiKey,
+		DisableIntegrity: disableIntegrity,
 	}, nil
 }
 
@@ -316,13 +318,97 @@ func shouldScanFile(path string) bool {
 }
 
 func analyzeFile(filename string, cfg models.ScanConfig) (*models.ShellDetection, error) {
-	coreResult, framework := integrity.CheckCoreFile(filename)
-	if coreResult == integrity.ResultMatch {
-		// File is a verified, unmodified core file of a known framework. Skip it!
+	if !cfg.DisableIntegrity {
+		coreResult, framework := integrity.CheckCoreFile(filename)
+		if coreResult == integrity.ResultMatch {
+			// File is a verified, unmodified core file of a known framework. Skip it!
+			return nil, nil
+		}
+
+		if !shouldScanFile(filename) && coreResult != integrity.ResultModified {
+			return nil, nil
+		}
+
+		// Skip files inside vendor or node_modules entirely to eliminate third-party library false positives
+		if strings.Contains(filepath.ToSlash(filename), "/vendor/") || strings.Contains(filepath.ToSlash(filename), "/node_modules/") {
+			return nil, nil
+		}
+
+		file, err := os.Open(filename)
+		if err != nil {
+			return nil, err
+		}
+		defer file.Close()
+
+		bufPtr := bufferPool8K.Get().(*[]byte)
+		buffer := *bufPtr
+		defer bufferPool8K.Put(bufPtr)
+
+		n, err := file.Read(buffer)
+		if err != nil && err != io.EOF {
+			return nil, err
+		}
+		reader := io.MultiReader(bytes.NewReader(buffer[:n]), file)
+
+		var detection *models.ShellDetection
+		if utils.LooksLikeText(buffer[:n]) {
+			detection, err = analyzeReader(filename, reader, cfg)
+		} else {
+			detection, err = analyzeBinaryReader(filename, reader, cfg, buffer[:n])
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		if coreResult == integrity.ResultModified {
+			if detection == nil {
+				detection = &models.ShellDetection{
+					Path:      filename,
+					Score:     0,
+					Evidences: make([]models.ShellEvidence, 0),
+				}
+			}
+			detection.Score += 20
+			detection.Evidences = append(detection.Evidences, models.ShellEvidence{
+				Kind:       "integrity",
+				Name:       framework + " Core File Modified",
+				Weight:     20,
+				LineNumber: 0,
+				Matched:    "MD5 checksum mismatch with official repository",
+			})
+		}
+
+		if detection != nil {
+			detection.Path = filename
+			if detection.Score < cfg.MinScore {
+				return nil, nil
+			}
+
+			sort.Slice(detection.Evidences, func(i, j int) bool {
+				if detection.Evidences[i].Weight == detection.Evidences[j].Weight {
+					return detection.Evidences[i].LineNumber < detection.Evidences[j].LineNumber
+				}
+				return detection.Evidences[i].Weight > detection.Evidences[j].Weight
+			})
+
+			maxEv := cfg.MaxEvidence
+			if maxEv <= 0 {
+				maxEv = config.DefaultMaxEvidence
+			}
+			if len(detection.Evidences) > maxEv {
+				detection.Evidences = detection.Evidences[:maxEv]
+			}
+		}
+
+		return detection, nil
+	}
+
+	if !shouldScanFile(filename) {
 		return nil, nil
 	}
 
-	if !shouldScanFile(filename) && coreResult != integrity.ResultModified {
+	// Skip files inside vendor or node_modules entirely to eliminate third-party library false positives
+	if strings.Contains(filepath.ToSlash(filename), "/vendor/") || strings.Contains(filepath.ToSlash(filename), "/node_modules/") {
 		return nil, nil
 	}
 
@@ -350,24 +436,6 @@ func analyzeFile(filename string, cfg models.ScanConfig) (*models.ShellDetection
 	}
 	if err != nil {
 		return nil, err
-	}
-
-	if coreResult == integrity.ResultModified {
-		if detection == nil {
-			detection = &models.ShellDetection{
-				Path:      filename,
-				Score:     0,
-				Evidences: make([]models.ShellEvidence, 0),
-			}
-		}
-		detection.Score += 20
-		detection.Evidences = append(detection.Evidences, models.ShellEvidence{
-			Kind:       "integrity",
-			Name:       framework + " Core File Modified",
-			Weight:     20,
-			LineNumber: 0,
-			Matched:    "MD5 checksum mismatch with official repository",
-		})
 	}
 
 	if detection != nil {
@@ -823,14 +891,14 @@ func addHeuristicEvidence(score int, evidences []models.ShellEvidence, indicator
 		{
 			key:     "heuristic:user-input-exec",
 			name:    "user input combined with command execution",
-			weight:  4,
+			weight:  3,
 			matched: "File combines request variables with command execution primitives.",
 			enabled: indicators.hasUserInput && indicators.commandExecHits > 0,
 		},
 		{
 			key:     "heuristic:obfuscated-exec",
 			name:    "obfuscation combined with execution",
-			weight:  4,
+			weight:  3,
 			matched: "File combines obfuscation helpers with execution functions.",
 			enabled: indicators.obfuscationHits > 0 && indicators.commandExecHits > 0,
 		},
@@ -892,8 +960,9 @@ func updateIndicators(line string, indicators *scanIndicators) {
 	}
 }
 
-func RunDetection(directories []string, wordlistPath, outputFile string, minScore, maxEvidence int, vtApiKey string, verbose bool, defaultWordlist embed.FS, numWorkers int) error {
-	cfg, err := BuildScanConfig(wordlistPath, minScore, maxEvidence, vtApiKey, defaultWordlist)
+func RunDetection(directories []string, wordlistPath, outPath string, minScore, maxEvidence int, vtApiKey string, disableIntegrity, verbose bool, defaultWordlist embed.FS, numWorkers int) error {
+
+	cfg, err := BuildScanConfig(wordlistPath, minScore, maxEvidence, vtApiKey, disableIntegrity, defaultWordlist)
 	if err != nil {
 		return err
 	}
@@ -908,11 +977,11 @@ func RunDetection(directories []string, wordlistPath, outputFile string, minScor
 	}
 
 	reporter.PrintDetectionSummary(summary, verbose)
-	if outputFile != "" {
-		if err := reporter.WriteDetectionsToFile(outputFile, summary); err != nil {
+	if outPath != "" {
+		if err := reporter.WriteDetectionsToFile(outPath, summary); err != nil {
 			return fmt.Errorf("error writing to output file: %w", err)
 		}
-		pterm.Success.Printf("Results have been saved to: %s\n", outputFile)
+		pterm.Success.Printf("Results have been saved to: %s\n", outPath)
 	}
 	return nil
 }

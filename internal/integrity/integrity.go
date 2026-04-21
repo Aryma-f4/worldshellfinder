@@ -201,6 +201,25 @@ func getWPPluginInfo(filePath string) (string, string, string) {
 		}
 	}
 
+	// If specific main files didn't work, scan all .php files in the root of the plugin directory
+	if version == "" {
+		entries, err := os.ReadDir(pluginDir)
+		if err == nil {
+			for _, entry := range entries {
+				if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".php") {
+					b, err := os.ReadFile(filepath.Join(pluginDir, entry.Name()))
+					if err == nil {
+						m := pluginVersionRegex.FindStringSubmatch(string(b))
+						if len(m) > 1 {
+							version = m[1]
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+
 	return pluginDir, pluginSlug, version
 }
 
