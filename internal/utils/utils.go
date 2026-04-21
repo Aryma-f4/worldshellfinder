@@ -2,10 +2,12 @@ package utils
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"math"
 	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -155,4 +157,49 @@ func CalculateEntropy(data []byte) float64 {
 		entropy -= p * math.Log2(p)
 	}
 	return entropy
+}
+
+var base64Rx = regexp.MustCompile(`^[A-Za-z0-9+/]+={0,2}$`)
+
+func LooksLikeBase64Token(s string) bool {
+	s = strings.TrimSpace(s)
+	if len(s) < 40 || len(s) > 4096 {
+		return false
+	}
+	if len(s)%4 != 0 {
+		return false
+	}
+	return base64Rx.MatchString(s)
+}
+
+func TryDecodeBase64Token(s string, maxDecodedBytes int) ([]byte, bool) {
+	if !LooksLikeBase64Token(s) {
+		return nil, false
+	}
+	decoded, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		return nil, false
+	}
+	if maxDecodedBytes > 0 && len(decoded) > maxDecodedBytes {
+		decoded = decoded[:maxDecodedBytes]
+	}
+	return decoded, true
+}
+
+func DecodedLooksLikePayload(b []byte) bool {
+	if len(b) == 0 {
+		return false
+	}
+	lower := strings.ToLower(string(b))
+	return strings.Contains(lower, "<?php") ||
+		strings.Contains(lower, "eval(") ||
+		strings.Contains(lower, "system(") ||
+		strings.Contains(lower, "shell_exec(") ||
+		strings.Contains(lower, "passthru(") ||
+		strings.Contains(lower, "child_process") ||
+		strings.Contains(lower, "runtime.getruntime().exec") ||
+		strings.Contains(lower, "processbuilder(") ||
+		strings.Contains(lower, "powershell") ||
+		strings.Contains(lower, "/bin/bash") ||
+		strings.Contains(lower, "/bin/sh")
 }

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/Aryma-f4/worldshellfinder/internal/config"
+	"github.com/Aryma-f4/worldshellfinder/internal/integrity"
 	"github.com/Aryma-f4/worldshellfinder/internal/remover"
 	"github.com/Aryma-f4/worldshellfinder/internal/scanner"
 	"github.com/Aryma-f4/worldshellfinder/internal/updater"
@@ -46,13 +47,35 @@ func readDirectoryListFile(path string) ([]string, error) {
 	return directories, nil
 }
 
+func parseCSV(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
 func main() {
 	helpFlag := flag.Bool("h", false, "display help information")
 	helpFlagLong := flag.Bool("help", false, "display help information")
 	updateFlag := flag.Bool("update", false, "update latest version from repository")
 	verboseFlag := flag.Bool("v", false, "enable verbose mode")
 	noIntegrityFlag := flag.Bool("no-integrity", false, "disable core file integrity verification")
-	modeFlag := flag.String("mode", "", "operation mode: detect, deep, or remove")
+	excludePathFlag := flag.String("exclude-path", "", "comma-separated path substrings to exclude from scanning")
+	excludeGlobFlag := flag.String("exclude-glob", "", "comma-separated glob patterns to exclude from scanning (supports **)")
+	includeExtFlag := flag.String("include-ext", "", "comma-separated file extensions to include (overrides default selection)")
+	excludeExtFlag := flag.String("exclude-ext", "", "comma-separated file extensions to exclude")
+	paranoidFlag := flag.Bool("paranoid", false, "enable paranoid mode (more aggressive polyglot checks)")
+	modeFlag := flag.String("mode", "", "operation mode: detect, deep, remove, or snapshot")
 	dirFlag := flag.String("dir", "", "directory to scan")
 	dirListFlag := flag.String("dir-list", "", "file containing a list of directories to scan (one per line)")
 	outFlag := flag.String("out", "", "output file path")
@@ -95,6 +118,16 @@ func main() {
 	outputFile := strings.TrimSpace(*outFlag)
 	vtApiKey := strings.TrimSpace(*vtApiKeyFlag)
 	wordlistPath := strings.TrimSpace(*wordlistFlag)
+	opts := scanner.RuntimeOptions{
+		DisableIntegrity: *noIntegrityFlag,
+		ExcludePathParts: parseCSV(*excludePathFlag),
+		ExcludeGlobs:     parseCSV(*excludeGlobFlag),
+		IncludeExt:       parseCSV(*includeExtFlag),
+		ExcludeExt:       parseCSV(*excludeExtFlag),
+		Paranoid:         *paranoidFlag,
+		Verbose:          verbose,
+		NumWorkers:       *workersFlag,
+	}
 
 	if mode != "" {
 		var directories []string
@@ -113,19 +146,25 @@ func main() {
 		}
 		switch mode {
 		case "detect":
-			if err := scanner.RunDetection(directories, wordlistPath, outputFile, *minScoreFlag, *maxEvidenceFlag, vtApiKey, *noIntegrityFlag, verbose, defaultWordlist, *workersFlag); err != nil {
+			if err := scanner.RunDetection(directories, wordlistPath, outputFile, *minScoreFlag, *maxEvidenceFlag, vtApiKey, opts, defaultWordlist); err != nil {
 				pterm.Fatal.Printf("Detection failed: %v\n", err)
 			}
 		case "deep":
-			if err := scanner.RunDeepScan(directories, wordlistPath, outputFile, *minScoreFlag, *maxEvidenceFlag, vtApiKey, *noIntegrityFlag, verbose, defaultWordlist, *workersFlag); err != nil {
+			if err := scanner.RunDeepScan(directories, wordlistPath, outputFile, *minScoreFlag, *maxEvidenceFlag, vtApiKey, opts, defaultWordlist); err != nil {
 				pterm.Fatal.Printf("Deep scan failed: %v\n", err)
 			}
 		case "remove":
 			if err := remover.RunRemoval(directories, outputFile, reader, *removeStringFlag, verbose, *workersFlag); err != nil {
 				pterm.Fatal.Printf("String removal failed: %v\n", err)
 			}
+		case "snapshot":
+			for _, d := range directories {
+				if err := integrity.SaveLocalBaseline(d); err != nil {
+					pterm.Fatal.Printf("Snapshot failed for %s: %v\n", d, err)
+				}
+			}
 		default:
-			pterm.Fatal.Printf("invalid mode %q, use detect, deep, or remove\n", mode)
+			pterm.Fatal.Printf("invalid mode %q, use detect, deep, remove, or snapshot\n", mode)
 		}
 		return
 	}
@@ -137,6 +176,7 @@ func main() {
 		"1. Normal WebShell Detection",
 		"2. Remove String from Files",
 		"3. Deep Scan (files, traffic, rootkit)",
+		"4. Create Premium Plugin Baseline Snapshot",
 	}
 	choice, _ := pterm.DefaultInteractiveSelect.WithOptions(options).Show("Please choose an operation mode")
 
@@ -163,7 +203,7 @@ func main() {
 			vtApiKey, _ = pterm.DefaultInteractiveTextInput.Show("Enter VirusTotal API Key (press Enter to skip)")
 			vtApiKey = strings.TrimSpace(vtApiKey)
 		}
-		err := scanner.RunDetection([]string{directory}, wordlistPath, outputFile, *minScoreFlag, *maxEvidenceFlag, vtApiKey, *noIntegrityFlag, verbose, defaultWordlist, *workersFlag)
+		err := scanner.RunDetection([]string{directory}, wordlistPath, outputFile, *minScoreFlag, *maxEvidenceFlag, vtApiKey, opts, defaultWordlist)
 		if err != nil {
 			pterm.Fatal.Printf("Detection failed: %v\n", err)
 		}
@@ -181,9 +221,13 @@ func main() {
 			vtApiKey, _ = pterm.DefaultInteractiveTextInput.Show("Enter VirusTotal API Key (press Enter to skip)")
 			vtApiKey = strings.TrimSpace(vtApiKey)
 		}
-		err := scanner.RunDeepScan([]string{directory}, wordlistPath, outputFile, *minScoreFlag, *maxEvidenceFlag, vtApiKey, *noIntegrityFlag, verbose, defaultWordlist, *workersFlag)
+		err := scanner.RunDeepScan([]string{directory}, wordlistPath, outputFile, *minScoreFlag, *maxEvidenceFlag, vtApiKey, opts, defaultWordlist)
 		if err != nil {
 			pterm.Fatal.Printf("Deep scan failed: %v\n", err)
+		}
+	case "4. Create Premium Plugin Baseline Snapshot":
+		if err := integrity.SaveLocalBaseline(directory); err != nil {
+			pterm.Fatal.Printf("Snapshot failed: %v\n", err)
 		}
 	default:
 		pterm.Error.Println("Invalid choice!")
@@ -198,12 +242,13 @@ func printHelp() {
 	fmt.Println("  worldshellfinder -mode deep -dir-list <file> [options]")
 	fmt.Println("  worldshellfinder -mode remove -dir <directory> -remove-string <value> [options]")
 	fmt.Println("  worldshellfinder -mode remove -dir-list <file> -remove-string <value> [options]")
+	fmt.Println("  worldshellfinder -mode snapshot -dir <plugin-directory>")
 	fmt.Println("  worldshellfinder")
 	fmt.Println()
 	fmt.Println("Options:")
 	fmt.Println("  -h, --help              Show help information")
 	fmt.Println("  -v                      Enable verbose output")
-	fmt.Println("  -mode string            Operation mode: detect, deep, or remove")
+	fmt.Println("  -mode string            Operation mode: detect, deep, remove, or snapshot")
 	fmt.Println("  -dir string             Directory to scan")
 	fmt.Println("  -dir-list string        File containing a list of directories to scan (one per line)")
 	fmt.Println("  -out string             Output file path")
@@ -214,5 +259,10 @@ func printHelp() {
 	fmt.Println("  -vt-api-key string      VirusTotal API key for checking suspicious files")
 	fmt.Println("  -workers int            Number of concurrent workers for scanning files (default: number of CPUs)")
 	fmt.Println("  -no-integrity           Disable Core File Integrity Verification (skip API checksum checks)")
+	fmt.Println("  -exclude-path string    Comma-separated path substrings to exclude")
+	fmt.Println("  -exclude-glob string    Comma-separated glob patterns to exclude (supports **)")
+	fmt.Println("  -include-ext string     Comma-separated extensions to include (overrides default)")
+	fmt.Println("  -exclude-ext string     Comma-separated extensions to exclude")
+	fmt.Println("  -paranoid               Enable paranoid mode (polyglot/binary disguised as text)")
 	fmt.Println("  --update                Update to the latest release")
 }

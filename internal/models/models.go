@@ -24,9 +24,10 @@ type ShellEvidence struct {
 }
 
 type ShellDetection struct {
-	Path      string
-	Score     int
-	Evidences []ShellEvidence
+	Path       string
+	Score      int
+	Confidence string
+	Evidences  []ShellEvidence
 }
 
 type KeywordRule struct {
@@ -35,13 +36,18 @@ type KeywordRule struct {
 }
 
 type ScanConfig struct {
-	GeneralKeywords []KeywordRule
-	ExtKeywords     map[string][]KeywordRule
-	Rules           []DetectionRule
-	MinScore        int
-	MaxEvidence     int
-	VTApiKey        string
+	GeneralKeywords  []KeywordRule
+	ExtKeywords      map[string][]KeywordRule
+	Rules            []DetectionRule
+	MinScore         int
+	MaxEvidence      int
+	VTApiKey         string
 	DisableIntegrity bool
+	ExcludePathParts []string
+	ExcludeGlobs     []string
+	IncludeExt       map[string]struct{}
+	ExcludeExt       map[string]struct{}
+	Paranoid         bool
 }
 
 type ScanSummary struct {

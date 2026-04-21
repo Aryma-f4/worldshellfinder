@@ -116,7 +116,7 @@ const Banner = `
 \  /\  / (_) | |  | | (_| /\__/ / | | |  __/ | | | |   | | | | | (_| |  __/ |   
  \/  \/ \___/|_|  |_|\__,_\____/|_| |_|\___|_|_| \_|   |_|_| |_|\__,_|\___|_|  
  ` + Reset + `
- made with love by ` + Yellow + ` Worldsavior/Aryma-f4 ` + Magenta + `^^	 ` + Green + `	v3.4.0 Stable Build  ` + Reset + `
+ made with love by ` + Yellow + ` Worldsavior/Aryma-f4 ` + Magenta + `^^	 ` + Green + `	v3.5.0 Stable Build  ` + Reset + `
 ===========================================================================================
 `
 

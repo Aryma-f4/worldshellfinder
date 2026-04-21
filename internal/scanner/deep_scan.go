@@ -3,6 +3,7 @@ package scanner
 import (
 	"embed"
 	"fmt"
+	"strings"
 
 	"github.com/Aryma-f4/worldshellfinder/internal/models"
 	"github.com/Aryma-f4/worldshellfinder/internal/reporter"
@@ -10,15 +11,15 @@ import (
 	"github.com/pterm/pterm"
 )
 
-func RunDeepScan(directories []string, wordlistPath, outputFile string, minScore, maxEvidence int, vtApiKey string, disableIntegrity, verbose bool, defaultWordlist embed.FS, numWorkers int) error {
-	cfg, err := BuildScanConfig(wordlistPath, minScore, maxEvidence, vtApiKey, disableIntegrity, defaultWordlist)
+func RunDeepScan(directories []string, wordlistPath, outputFile string, minScore, maxEvidence int, vtApiKey string, opts RuntimeOptions, defaultWordlist embed.FS) error {
+	cfg, err := BuildScanConfig(wordlistPath, minScore, maxEvidence, vtApiKey, opts, defaultWordlist)
 	if err != nil {
 		return err
 	}
 
 	done := make(chan bool)
 	go utils.LoadingAnimation(done)
-	fileSummary, err := ScanDirectories(directories, cfg, verbose, numWorkers)
+	fileSummary, err := ScanDirectories(directories, cfg, opts.Verbose, opts.NumWorkers)
 	if err != nil {
 		done <- true
 		fmt.Print("\rOperation complete!                          \n")
@@ -47,15 +48,30 @@ func RunDeepScan(directories []string, wordlistPath, outputFile string, minScore
 	}
 
 	pterm.DefaultSection.Println("Deep Scan Summary")
-	reporter.PrintDetectionSummary(fileSummary, verbose)
+	reporter.PrintDetectionSummary(fileSummary, opts.Verbose)
 	reporter.PrintSystemFindings("Suspicious Traffic", trafficFindings)
 	reporter.PrintSystemFindings("Suspicious Logs", logFindings)
 	reporter.PrintSystemFindings("Rootkit Findings", rootkitFindings)
 	reporter.PrintWarnings(warnings)
 
 	if outputFile != "" {
-		if err := reporter.WriteDeepScanToFile(outputFile, summary); err != nil {
-			return fmt.Errorf("error writing deep scan output: %w", err)
+		lowerOut := strings.ToLower(outputFile)
+		if strings.HasSuffix(lowerOut, ".md") || strings.HasSuffix(lowerOut, ".markdown") {
+			if err := reporter.WriteDeepScanToMarkdown(outputFile, summary); err != nil {
+				return fmt.Errorf("error writing deep scan output: %w", err)
+			}
+		} else if strings.HasSuffix(lowerOut, ".json") {
+			if err := reporter.WriteDeepScanToJSON(outputFile, summary); err != nil {
+				return fmt.Errorf("error writing deep scan output: %w", err)
+			}
+		} else if strings.HasSuffix(lowerOut, ".sarif") {
+			if err := reporter.WriteDeepScanToSARIF(outputFile, summary); err != nil {
+				return fmt.Errorf("error writing deep scan output: %w", err)
+			}
+		} else {
+			if err := reporter.WriteDeepScanToFile(outputFile, summary); err != nil {
+				return fmt.Errorf("error writing deep scan output: %w", err)
+			}
 		}
 		pterm.Success.Printf("Results have been saved to: %s\n", outputFile)
 	}

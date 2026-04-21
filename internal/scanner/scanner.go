@@ -134,7 +134,10 @@ func BuildDetectionRules() ([]models.DetectionRule, error) {
 		{"preg replace eval modifier", `(?i)preg_replace\s*\(\s*['"][^'"]*/e[^'"]*['"]`, 4},
 		{"runtime exec jsp", `(?i)Runtime\.getRuntime\(\)\.exec\s*\(`, 5},
 		{"asp request eval", `(?i)(?:Execute|Eval)\s*\(\s*Request\.(?:Form|QueryString|Item)`, 5},
+		{"aspx user input exec", `(?i)Request\[[^\]]*(?:cmd|exec|shell|payload)[^\]]*\].*?(?:Process\.Start|Diagnostics\.Process)`, 5},
 		{"process builder command", `(?i)ProcessBuilder\s*\(\s*(?:new\s+String\[\]|["'])`, 4},
+		{"node user input exec", `(?i)(?:req|request)\.(?:query|body)\.[a-z0-9_]*(?:cmd|exec|shell|command)[a-z0-9_]*.*?(?:child_process|exec\s*\(|spawn\s*\(|execsync\s*\()`, 5},
+		{"python user input exec", `(?i)(?:request\.args\.get|request\.form\.get)\s*\(\s*['"](?:cmd|exec|shell|command|payload)['"].*?(?:os\.system|subprocess\.)`, 5},
 		{"halt compiler payload", `(?i)__halt_compiler\s*\(`, 4},
 		{"command parameter", `(?i)\$_(?:GET|POST|REQUEST)\s*\[\s*['"](?:cmd|exec|shell|payload)['"]\s*\]`, 2},
 		{"upload form marker", `(?i)(?:multipart/form-data|type\s*=\s*["']file["'])`, 1},
@@ -157,7 +160,7 @@ func BuildDetectionRules() ([]models.DetectionRule, error) {
 	return rules, nil
 }
 
-func BuildScanConfig(wordlistPath string, minScore, maxEvidence int, vtApiKey string, disableIntegrity bool, defaultWordlist embed.FS) (models.ScanConfig, error) {
+func BuildScanConfig(wordlistPath string, minScore, maxEvidence int, vtApiKey string, opts RuntimeOptions, defaultWordlist embed.FS) (models.ScanConfig, error) {
 	general, byExt, err := LoadKeywords(wordlistPath, defaultWordlist)
 	if err != nil {
 		return models.ScanConfig{}, fmt.Errorf("fail to load keywords: %w", err)
@@ -175,8 +178,98 @@ func BuildScanConfig(wordlistPath string, minScore, maxEvidence int, vtApiKey st
 		MinScore:         minScore,
 		MaxEvidence:      maxEvidence,
 		VTApiKey:         vtApiKey,
-		DisableIntegrity: disableIntegrity,
+		DisableIntegrity: opts.DisableIntegrity,
+		ExcludePathParts: opts.ExcludePathParts,
+		ExcludeGlobs:     opts.ExcludeGlobs,
+		IncludeExt:       normalizeExtSet(opts.IncludeExt),
+		ExcludeExt:       normalizeExtSet(opts.ExcludeExt),
+		Paranoid:         opts.Paranoid,
 	}, nil
+}
+
+func normalizeExtSet(exts []string) map[string]struct{} {
+	out := make(map[string]struct{})
+	for _, e := range exts {
+		e = strings.TrimSpace(strings.ToLower(e))
+		if e == "" {
+			continue
+		}
+		if !strings.HasPrefix(e, ".") {
+			e = "." + e
+		}
+		out[e] = struct{}{}
+	}
+	return out
+}
+
+func shouldQueueFile(path string, cfg models.ScanConfig) bool {
+	p := filepath.ToSlash(strings.ToLower(path))
+	for _, part := range cfg.ExcludePathParts {
+		part = strings.TrimSpace(strings.ToLower(part))
+		if part == "" {
+			continue
+		}
+		if strings.Contains(p, part) {
+			return false
+		}
+	}
+
+	ext := strings.ToLower(filepath.Ext(path))
+	if len(cfg.IncludeExt) > 0 {
+		if _, ok := cfg.IncludeExt[ext]; !ok {
+			return false
+		}
+	}
+	if _, ok := cfg.ExcludeExt[ext]; ok {
+		return false
+	}
+
+	for _, glob := range cfg.ExcludeGlobs {
+		glob = strings.TrimSpace(glob)
+		if glob == "" {
+			continue
+		}
+		if globMatch(p, glob) {
+			return false
+		}
+	}
+	return true
+}
+
+func globMatch(path, glob string) bool {
+	glob = filepath.ToSlash(strings.ToLower(glob))
+	rx, err := globToRegex(glob)
+	if err != nil {
+		return false
+	}
+	return rx.MatchString(path)
+}
+
+func globToRegex(glob string) (*regexp.Regexp, error) {
+	var b strings.Builder
+	b.WriteString("^")
+	i := 0
+	for i < len(glob) {
+		if glob[i] == '*' {
+			if i+1 < len(glob) && glob[i+1] == '*' {
+				b.WriteString(".*")
+				i += 2
+				continue
+			}
+			b.WriteString(`[^/]*`)
+			i++
+			continue
+		}
+		if glob[i] == '?' {
+			b.WriteString(`[^/]`)
+			i++
+			continue
+		}
+		b.WriteString(regexp.QuoteMeta(string(glob[i])))
+		i++
+	}
+	b.WriteString("$")
+	return regexp.Compile(b.String())
 }
 
 func ScanDirectories(directories []string, cfg models.ScanConfig, verbose bool, numWorkers int) (*models.ScanSummary, error) {
@@ -233,7 +326,9 @@ func ScanDirectories(directories []string, cfg models.ScanConfig, verbose bool, 
 				return nil
 			}
 
-			fileChan <- path
+			if shouldQueueFile(path, cfg) {
+				fileChan <- path
+			}
 			return nil
 		})
 		if err != nil {
@@ -273,11 +368,13 @@ var (
 	}
 )
 
-func shouldScanFile(path string) bool {
+func shouldScanFile(path string, paranoid bool) bool {
 	ext := strings.ToLower(filepath.Ext(path))
 
 	if _, ok := config.IgnoredExtensions[ext]; ok {
-		return false
+		if !paranoid {
+			return false
+		}
 	}
 
 	if _, ok := config.SuspiciousExtensions[ext]; ok {
@@ -309,6 +406,12 @@ func shouldScanFile(path string) bool {
 		return false
 	}
 	sample := buffer[:n]
+	if _, ok := config.IgnoredExtensions[ext]; ok && paranoid {
+		if bytes.Contains(sample, []byte("<?php")) || bytes.Contains(sample, []byte("<?=")) || bytes.Contains(sample, []byte("<%")) {
+			return true
+		}
+		return false
+	}
 	if utils.LooksLikeText(sample) {
 		return true
 	}
@@ -326,7 +429,7 @@ func analyzeFile(filename string, cfg models.ScanConfig) (*models.ShellDetection
 			return nil, nil
 		}
 
-		if !shouldScanFile(filename) && coreResult != integrity.ResultModified {
+		if !shouldScanFile(filename, cfg.Paranoid) && coreResult != integrity.ResultModified {
 			return nil, nil
 		}
 
@@ -356,6 +459,9 @@ func analyzeFile(filename string, cfg models.ScanConfig) (*models.ShellDetection
 
 		var detection *models.ShellDetection
 		if utils.LooksLikeText(buffer[:n]) {
+			if isAllowlistedFile(buffer[:n]) {
+				return nil, nil
+			}
 			detection, err = analyzeReader(filename, reader, cfg)
 		} else {
 			detection, err = analyzeBinaryReader(filename, reader, cfg, buffer[:n])
@@ -367,9 +473,10 @@ func analyzeFile(filename string, cfg models.ScanConfig) (*models.ShellDetection
 		if coreResult == integrity.ResultModified {
 			if detection == nil {
 				detection = &models.ShellDetection{
-					Path:      filename,
-					Score:     0,
-					Evidences: make([]models.ShellEvidence, 0),
+					Path:       filename,
+					Score:      0,
+					Confidence: "",
+					Evidences:  make([]models.ShellEvidence, 0),
 				}
 			}
 			detection.Score += 20
@@ -382,8 +489,11 @@ func analyzeFile(filename string, cfg models.ScanConfig) (*models.ShellDetection
 			})
 		}
 
+		applySuspiciousLocation(filename, &detection)
+
 		if detection != nil {
 			detection.Path = filename
+			detection.Confidence = computeConfidence(detection)
 			if detection.Score < cfg.MinScore {
 				return nil, nil
 			}
@@ -407,7 +517,7 @@ func analyzeFile(filename string, cfg models.ScanConfig) (*models.ShellDetection
 		return detection, nil
 	}
 
-	if !shouldScanFile(filename) {
+	if !shouldScanFile(filename, cfg.Paranoid) {
 		return nil, nil
 	}
 
@@ -434,6 +544,9 @@ func analyzeFile(filename string, cfg models.ScanConfig) (*models.ShellDetection
 
 	var detection *models.ShellDetection
 	if utils.LooksLikeText(buffer[:n]) {
+		if isAllowlistedFile(buffer[:n]) {
+			return nil, nil
+		}
 		detection, err = analyzeReader(filename, reader, cfg)
 	} else {
 		detection, err = analyzeBinaryReader(filename, reader, cfg, buffer[:n])
@@ -442,8 +555,11 @@ func analyzeFile(filename string, cfg models.ScanConfig) (*models.ShellDetection
 		return nil, err
 	}
 
+	applySuspiciousLocation(filename, &detection)
+
 	if detection != nil {
 		detection.Path = filename
+		detection.Confidence = computeConfidence(detection)
 		if detection.Score < cfg.MinScore {
 			return nil, nil
 		}
@@ -465,6 +581,79 @@ func analyzeFile(filename string, cfg models.ScanConfig) (*models.ShellDetection
 	}
 
 	return detection, nil
+}
+
+func applySuspiciousLocation(filename string, detection **models.ShellDetection) {
+	ext := strings.ToLower(filepath.Ext(filename))
+	if ext != ".php" && ext != ".phtml" && ext != ".php3" && ext != ".php4" && ext != ".php5" && ext != ".phar" {
+		return
+	}
+	path := filepath.ToSlash(strings.ToLower(filename))
+	if !(strings.Contains(path, "/wp-content/uploads/") || strings.Contains(path, "/uploads/") || strings.Contains(path, "/cache/") || strings.Contains(path, "/tmp/")) {
+		return
+	}
+	if *detection == nil {
+		*detection = &models.ShellDetection{
+			Path:       filename,
+			Score:      0,
+			Confidence: "",
+			Evidences:  make([]models.ShellEvidence, 0),
+		}
+	}
+	(*detection).Score += 4
+	(*detection).Evidences = append((*detection).Evidences, models.ShellEvidence{
+		Kind:       "location",
+		Name:       "executable script in suspicious directory",
+		Weight:     4,
+		LineNumber: 0,
+		Matched:    utils.ShortenEvidence(path),
+	})
+}
+
+func computeConfidence(d *models.ShellDetection) string {
+	if d == nil {
+		return ""
+	}
+	hasIntegrity := false
+	hasHighRule := false
+	hasExecRule := false
+	hasVT := false
+	for _, ev := range d.Evidences {
+		if ev.Kind == "integrity" && ev.Weight >= 20 {
+			hasIntegrity = true
+		}
+		if ev.Kind == "virustotal" {
+			hasVT = true
+		}
+		if ev.Kind == "rule" && ev.Weight >= 10 {
+			hasHighRule = true
+		}
+		if ev.Kind == "rule" && strings.Contains(strings.ToLower(ev.Name), "command execution") {
+			hasExecRule = true
+		}
+	}
+	if hasVT || hasIntegrity || hasHighRule {
+		return "high"
+	}
+	if d.Score >= 15 || hasExecRule {
+		return "high"
+	}
+	if d.Score >= 8 {
+		return "medium"
+	}
+	return "low"
+}
+
+func lineHasLongBase64Token(line string) bool {
+	fields := strings.FieldsFunc(line, func(r rune) bool {
+		return r == ' ' || r == '"' || r == '\'' || r == ';' || r == '(' || r == ')' || r == '{' || r == '}' || r == ',' || r == ':' || r == '='
+	})
+	for _, field := range fields {
+		if utils.LooksLikeBase64Token(field) {
+			return true
+		}
+	}
+	return false
 }
 
 func getFileHash(filename string) string {
@@ -573,14 +762,20 @@ func analyzeReader(filename string, reader io.Reader, cfg models.ScanConfig) (*m
 				if len(field) > 120 {
 					ent := utils.CalculateEntropy([]byte(field))
 					if ent > 5.5 {
+						weight := 1
+						if decoded, ok := utils.TryDecodeBase64Token(field, 4096); ok {
+							if utils.DecodedLooksLikePayload(decoded) {
+								weight = 3
+							}
+						}
 						key := "entropy:" + field[:20]
 						if _, exists := seen[key]; !exists {
 							seen[key] = struct{}{}
-							score += 3
+							score += weight
 							evidences = append(evidences, models.ShellEvidence{
 								Kind:       "heuristic",
 								Name:       "high entropy string (obfuscation/payload)",
-								Weight:     3,
+								Weight:     weight,
 								LineNumber: lineNumber,
 								Matched:    utils.ShortenEvidence(field),
 							})
@@ -636,6 +831,14 @@ func analyzeReader(filename string, reader io.Reader, cfg models.ScanConfig) (*m
 		}
 
 		for _, rule := range cfg.Rules {
+			if rule.Name == "known webshell names" {
+				if !isSuspiciousExt {
+					continue
+				}
+				if lineHasLongBase64Token(lowerLine) {
+					continue
+				}
+			}
 			if !rule.Pattern.MatchString(line) {
 				continue
 			}
@@ -989,26 +1192,40 @@ func updateIndicators(line string, indicators *scanIndicators) {
 	}
 }
 
-func RunDetection(directories []string, wordlistPath, outPath string, minScore, maxEvidence int, vtApiKey string, disableIntegrity, verbose bool, defaultWordlist embed.FS, numWorkers int) error {
-
-	cfg, err := BuildScanConfig(wordlistPath, minScore, maxEvidence, vtApiKey, disableIntegrity, defaultWordlist)
+func RunDetection(directories []string, wordlistPath, outPath string, minScore, maxEvidence int, vtApiKey string, opts RuntimeOptions, defaultWordlist embed.FS) error {
+	cfg, err := BuildScanConfig(wordlistPath, minScore, maxEvidence, vtApiKey, opts, defaultWordlist)
 	if err != nil {
 		return err
 	}
 
 	done := make(chan bool)
 	go utils.LoadingAnimation(done)
-	summary, err := ScanDirectories(directories, cfg, verbose, numWorkers)
+	summary, err := ScanDirectories(directories, cfg, opts.Verbose, opts.NumWorkers)
 	done <- true
 	fmt.Print("\rOperation complete!                          \n")
 	if err != nil {
 		return err
 	}
 
-	reporter.PrintDetectionSummary(summary, verbose)
+	reporter.PrintDetectionSummary(summary, opts.Verbose)
 	if outPath != "" {
-		if err := reporter.WriteDetectionsToFile(outPath, summary); err != nil {
-			return fmt.Errorf("error writing to output file: %w", err)
+		lowerOut := strings.ToLower(outPath)
+		if strings.HasSuffix(lowerOut, ".md") || strings.HasSuffix(lowerOut, ".markdown") {
+			if err := reporter.WriteDetectionsToMarkdown(outPath, summary); err != nil {
+				return fmt.Errorf("error writing to output file: %w", err)
+			}
+		} else if strings.HasSuffix(lowerOut, ".json") {
+			if err := reporter.WriteDetectionsToJSON(outPath, summary); err != nil {
+				return fmt.Errorf("error writing to output file: %w", err)
+			}
+		} else if strings.HasSuffix(lowerOut, ".sarif") {
+			if err := reporter.WriteDetectionsToSARIF(outPath, summary); err != nil {
+				return fmt.Errorf("error writing to output file: %w", err)
+			}
+		} else {
+			if err := reporter.WriteDetectionsToFile(outPath, summary); err != nil {
+				return fmt.Errorf("error writing to output file: %w", err)
+			}
 		}
 		pterm.Success.Printf("Results have been saved to: %s\n", outPath)
 	}

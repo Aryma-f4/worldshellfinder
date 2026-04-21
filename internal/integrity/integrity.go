@@ -36,7 +36,21 @@ var (
 
 	versionRegex       = regexp.MustCompile(`\$wp_version\s*=\s*['"]([^'"]+)['"]`)
 	pluginVersionRegex = regexp.MustCompile(`(?i)Version:\s*([0-9\.]+)`)
+
+	cacheOnce   sync.Once
+	cacheMu     sync.Mutex
+	checksumTTL = 24 * time.Hour
 )
+
+type checksumEntry struct {
+	FetchedAt int64             `json:"fetched_at"`
+	Checksums map[string]string `json:"checksums"`
+}
+
+type checksumDiskCache struct {
+	Core    map[string]checksumEntry `json:"core"`
+	Plugins map[string]checksumEntry `json:"plugins"`
+}
 
 type CheckResult int
 
@@ -45,6 +59,8 @@ const (
 	ResultMatch
 	ResultModified
 )
+
+var apiLimiter = time.NewTicker(350 * time.Millisecond)
 
 func getWPRoot(filePath string) (string, string) {
 	dir := filepath.Dir(filePath)
@@ -100,10 +116,122 @@ func getWPRoot(filePath string) (string, string) {
 	return root, version
 }
 
+func cacheFilePath() string {
+	dir, err := os.UserCacheDir()
+	if err != nil || dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "worldshellfinder", "wp_checksums.json")
+}
+
+func ensureCacheLoaded() {
+	cacheOnce.Do(func() {
+		p := cacheFilePath()
+		if p == "" {
+			return
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return
+		}
+		var data checksumDiskCache
+		if err := json.Unmarshal(b, &data); err != nil {
+			return
+		}
+		if data.Core == nil {
+			data.Core = make(map[string]checksumEntry)
+		}
+		if data.Plugins == nil {
+			data.Plugins = make(map[string]checksumEntry)
+		}
+
+		now := time.Now().Unix()
+		for ver, entry := range data.Core {
+			if entry.FetchedAt <= 0 || now-entry.FetchedAt > int64(checksumTTL.Seconds()) {
+				continue
+			}
+			if len(entry.Checksums) > 0 {
+				wpChecksums[ver] = entry.Checksums
+			}
+		}
+		for key, entry := range data.Plugins {
+			if entry.FetchedAt <= 0 || now-entry.FetchedAt > int64(checksumTTL.Seconds()) {
+				continue
+			}
+			if len(entry.Checksums) > 0 {
+				wpPluginChecksums[key] = entry.Checksums
+			}
+		}
+	})
+}
+
+func saveCacheLocked() {
+	p := cacheFilePath()
+	if p == "" {
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(p), 0o755)
+
+	data := checksumDiskCache{
+		Core:    make(map[string]checksumEntry),
+		Plugins: make(map[string]checksumEntry),
+	}
+
+	now := time.Now().Unix()
+	wpChecksumsMu.RLock()
+	for ver, c := range wpChecksums {
+		if len(c) == 0 {
+			continue
+		}
+		data.Core[ver] = checksumEntry{FetchedAt: now, Checksums: c}
+	}
+	wpChecksumsMu.RUnlock()
+
+	wpPluginChecksumsMu.RLock()
+	for key, c := range wpPluginChecksums {
+		if len(c) == 0 {
+			continue
+		}
+		data.Plugins[key] = checksumEntry{FetchedAt: now, Checksums: c}
+	}
+	wpPluginChecksumsMu.RUnlock()
+
+	b, err := json.Marshal(data)
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(p, b, 0o644)
+}
+
+func doGET(url string) (*http.Response, error) {
+	client := &http.Client{Timeout: 15 * time.Second}
+	var lastErr error
+	for attempt := 0; attempt < 4; attempt++ {
+		<-apiLimiter.C
+		resp, err := client.Get(url)
+		if err == nil && resp != nil && resp.StatusCode == http.StatusOK {
+			return resp, nil
+		}
+		if resp != nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusNotFound {
+				return nil, fmt.Errorf("not found")
+			}
+		}
+		if err != nil {
+			lastErr = err
+		} else {
+			lastErr = fmt.Errorf("http status not ok")
+		}
+		time.Sleep(time.Duration(200*(attempt+1)) * time.Millisecond)
+	}
+	return nil, lastErr
+}
+
 func fetchWPChecksums(version string) (map[string]string, error) {
 	url := fmt.Sprintf("https://api.wordpress.org/core/checksums/1.0/?version=%s&locale=en_US", version)
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Get(url)
+	resp, err := doGET(url)
 	if err != nil {
 		return nil, err
 	}
@@ -121,18 +249,97 @@ func fetchWPChecksums(version string) (map[string]string, error) {
 	return data.Checksums, nil
 }
 
+func getBaselinePath(slug, version string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(home, ".cache", "worldshellfinder", "baselines")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, fmt.Sprintf("%s-%s.json", slug, version)), nil
+}
+
+func loadLocalBaseline(slug, version string) (map[string]string, error) {
+	path, err := getBaselinePath(slug, version)
+	if err != nil {
+		return nil, err
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var data map[string]string
+	if err := json.Unmarshal(b, &data); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func SaveLocalBaseline(pluginDir string) error {
+	_, slug, version := getWPPluginInfo(filepath.Join(pluginDir, "dummy.php"))
+	if slug == "" || version == "" {
+		return fmt.Errorf("could not determine plugin slug or version from %s", pluginDir)
+	}
+
+	checksums := make(map[string]string)
+	err := filepath.Walk(pluginDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+
+		relPath, err := filepath.Rel(pluginDir, path)
+		if err != nil {
+			return nil
+		}
+		relPath = filepath.ToSlash(relPath)
+
+		f, err := os.Open(path)
+		if err != nil {
+			return nil
+		}
+		defer f.Close()
+
+		h := md5.New()
+		if _, err := io.Copy(h, f); err != nil {
+			return nil
+		}
+		checksums[relPath] = hex.EncodeToString(h.Sum(nil))
+		return nil
+	})
+
+	if err != nil {
+		return err
+	}
+
+	outPath, err := getBaselinePath(slug, version)
+	if err != nil {
+		return err
+	}
+
+	b, err := json.MarshalIndent(checksums, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(outPath, b, 0644); err != nil {
+		return err
+	}
+
+	fmt.Printf("Baseline saved to %s (%d files)\n", outPath, len(checksums))
+	return nil
+}
+
 func fetchWPPluginChecksums(pluginSlug, version string) (map[string]string, error) {
 	url := fmt.Sprintf("https://downloads.wordpress.org/plugin-checksums/%s/%s.json", pluginSlug, version)
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(url)
+	resp, err := doGET(url)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("plugin checksum API returned %d", resp.StatusCode)
-	}
 
 	var data struct {
 		Files map[string]struct {
@@ -224,6 +431,8 @@ func getWPPluginInfo(filePath string) (string, string, string) {
 }
 
 func checkWPPlugin(filePath string) (CheckResult, string) {
+	ensureCacheLoaded()
+
 	pluginDir, slug, version := getWPPluginInfo(filePath)
 	if pluginDir == "" || slug == "" || version == "" {
 		return ResultUnknown, ""
@@ -239,15 +448,26 @@ func checkWPPlugin(filePath string) (CheckResult, string) {
 		wpPluginChecksumsMu.Lock()
 		checksums, ok = wpPluginChecksums[cacheKey]
 		if !ok {
-			pterm.Info.Printf("\rFetching WP Plugin %s (%s) checksums...      \n", slug, version)
-			fetched, err := fetchWPPluginChecksums(slug, version)
-			if err == nil {
-				wpPluginChecksums[cacheKey] = fetched
-				checksums = fetched
+			// First, try to load from local premium baseline
+			localChecksums, err := loadLocalBaseline(slug, version)
+			if err == nil && len(localChecksums) > 0 {
+				pterm.Info.Printf("\rUsing local baseline for %s (%s)...      \n", slug, version)
+				wpPluginChecksums[cacheKey] = localChecksums
+				checksums = localChecksums
 			} else {
-				// Prevent re-fetching if failed
-				wpPluginChecksums[cacheKey] = map[string]string{}
-				checksums = wpPluginChecksums[cacheKey]
+				pterm.Info.Printf("\rFetching WP Plugin %s (%s) checksums...      \n", slug, version)
+				fetched, err := fetchWPPluginChecksums(slug, version)
+				if err == nil {
+					wpPluginChecksums[cacheKey] = fetched
+					checksums = fetched
+					cacheMu.Lock()
+					saveCacheLocked()
+					cacheMu.Unlock()
+				} else {
+					// Prevent re-fetching if failed
+					wpPluginChecksums[cacheKey] = map[string]string{}
+					checksums = wpPluginChecksums[cacheKey]
+				}
 			}
 		}
 		wpPluginChecksumsMu.Unlock()
@@ -321,6 +541,8 @@ func CheckCoreFile(filePath string) (CheckResult, string) {
 }
 
 func checkWordPress(filePath string) (CheckResult, string) {
+	ensureCacheLoaded()
+
 	root, version := getWPRoot(filePath)
 	if root == "" || version == "" {
 		return ResultUnknown, ""
@@ -339,6 +561,9 @@ func checkWordPress(filePath string) (CheckResult, string) {
 			if err == nil {
 				wpChecksums[version] = fetched
 				checksums = fetched
+				cacheMu.Lock()
+				saveCacheLocked()
+				cacheMu.Unlock()
 			} else {
 				wpChecksums[version] = map[string]string{}
 				checksums = wpChecksums[version]
