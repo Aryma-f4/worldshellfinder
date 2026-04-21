@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -27,10 +28,14 @@ var (
 	wpChecksums   = make(map[string]map[string]string)
 	wpChecksumsMu sync.RWMutex
 
+	wpPluginChecksums   = make(map[string]map[string]string) // key: "pluginSlug:version" -> map[file]md5
+	wpPluginChecksumsMu sync.RWMutex
+
 	frameworkRoots   = make(map[string]string)
 	frameworkRootsMu sync.RWMutex
 
-	versionRegex = regexp.MustCompile(`\$wp_version\s*=\s*['"]([^'"]+)['"]`)
+	versionRegex       = regexp.MustCompile(`\$wp_version\s*=\s*['"]([^'"]+)['"]`)
+	pluginVersionRegex = regexp.MustCompile(`(?i)Version:\s*([0-9\.]+)`)
 )
 
 type CheckResult int
@@ -116,9 +121,161 @@ func fetchWPChecksums(version string) (map[string]string, error) {
 	return data.Checksums, nil
 }
 
+func fetchWPPluginChecksums(pluginSlug, version string) (map[string]string, error) {
+	url := fmt.Sprintf("https://downloads.wordpress.org/plugin-checksums/%s/%s.json", pluginSlug, version)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("plugin checksum API returned %d", resp.StatusCode)
+	}
+
+	var data struct {
+		Files map[string]struct {
+			MD5 string `json:"md5"`
+		} `json:"files"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return nil, err
+	}
+
+	checksums := make(map[string]string, len(data.Files))
+	for file, hashes := range data.Files {
+		if hashes.MD5 != "" {
+			checksums[file] = hashes.MD5
+		}
+	}
+
+	if len(checksums) == 0 {
+		return nil, fmt.Errorf("no valid md5 hashes found in response")
+	}
+	return checksums, nil
+}
+
+func getWPPluginInfo(filePath string) (string, string, string) {
+	// Must be inside wp-content/plugins/
+	if !strings.Contains(filePath, filepath.Join("wp-content", "plugins")) {
+		return "", "", ""
+	}
+
+	parts := strings.Split(filepath.ToSlash(filePath), "/")
+	var pluginsIndex int = -1
+	for i, part := range parts {
+		if part == "plugins" {
+			pluginsIndex = i
+			break
+		}
+	}
+
+	if pluginsIndex == -1 || pluginsIndex+1 >= len(parts) {
+		return "", "", ""
+	}
+
+	pluginSlug := parts[pluginsIndex+1]
+	pluginDir := filepath.Join(parts[:pluginsIndex+2]...)
+
+	if runtime.GOOS == "windows" {
+		pluginDir = strings.ReplaceAll(pluginDir, "/", "\\")
+	} else {
+		pluginDir = "/" + pluginDir
+	}
+
+	mainFileCandidates := []string{
+		filepath.Join(pluginDir, pluginSlug+".php"),
+		filepath.Join(pluginDir, "index.php"),
+	}
+
+	// Read version from main plugin file
+	version := ""
+	for _, cand := range mainFileCandidates {
+		if b, err := os.ReadFile(cand); err == nil {
+			m := pluginVersionRegex.FindStringSubmatch(string(b))
+			if len(m) > 1 {
+				version = m[1]
+				break
+			}
+		}
+	}
+
+	return pluginDir, pluginSlug, version
+}
+
+func checkWPPlugin(filePath string) (CheckResult, string) {
+	pluginDir, slug, version := getWPPluginInfo(filePath)
+	if pluginDir == "" || slug == "" || version == "" {
+		return ResultUnknown, ""
+	}
+
+	cacheKey := slug + ":" + version
+
+	wpPluginChecksumsMu.RLock()
+	checksums, ok := wpPluginChecksums[cacheKey]
+	wpPluginChecksumsMu.RUnlock()
+
+	if !ok {
+		wpPluginChecksumsMu.Lock()
+		checksums, ok = wpPluginChecksums[cacheKey]
+		if !ok {
+			pterm.Info.Printf("\rFetching WP Plugin %s (%s) checksums...      \n", slug, version)
+			fetched, err := fetchWPPluginChecksums(slug, version)
+			if err == nil {
+				wpPluginChecksums[cacheKey] = fetched
+				checksums = fetched
+			} else {
+				// Prevent re-fetching if failed
+				wpPluginChecksums[cacheKey] = map[string]string{}
+				checksums = wpPluginChecksums[cacheKey]
+			}
+		}
+		wpPluginChecksumsMu.Unlock()
+	}
+
+	if len(checksums) == 0 {
+		return ResultUnknown, ""
+	}
+
+	relPath, err := filepath.Rel(pluginDir, filePath)
+	if err != nil {
+		return ResultUnknown, ""
+	}
+	relPath = filepath.ToSlash(relPath)
+
+	expectedMD5, exists := checksums[relPath]
+	if !exists {
+		return ResultUnknown, ""
+	}
+
+	f, err := os.Open(filePath)
+	if err != nil {
+		return ResultUnknown, ""
+	}
+	defer f.Close()
+
+	h := md5.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return ResultUnknown, ""
+	}
+	actualMD5 := hex.EncodeToString(h.Sum(nil))
+
+	if actualMD5 == expectedMD5 {
+		return ResultMatch, "WP Plugin (" + slug + ")"
+	}
+	return ResultModified, "WP Plugin (" + slug + ")"
+}
+
 func CheckCoreFile(filePath string) (CheckResult, string) {
-	// First check WordPress
+	// First check WordPress Core
 	res, fw := checkWordPress(filePath)
+	if res != ResultUnknown {
+		return res, fw
+	}
+
+	// Then check WordPress Plugins
+	res, fw = checkWPPlugin(filePath)
 	if res != ResultUnknown {
 		return res, fw
 	}

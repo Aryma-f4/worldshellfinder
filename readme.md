@@ -49,6 +49,7 @@ The scanner evaluates files using multiple signals:
 - **Smart Extension Filtering:** Automatically ignores static media files, documents, and fonts (e.g. `.jpg`, `.pdf`, `.zip`, `.woff`) to drastically reduce false positives and speed up the scanning process.
 - **Core File Integrity Verification:** Automatically detects framework installations and verifies core/vendor files. Unmodified files are safely ignored (Zero False Positives), while modified core files are immediately flagged! Supported frameworks:
   - **WordPress** (Full MD5 checksum validation via official API)
+  - **WordPress Plugins** (Full MD5 checksum validation against official wp.org plugin SVN API)
   - **Laravel** (Vendor path validation via `artisan` root detection)
   - **CodeIgniter 4** (System & Vendor path validation via `spark` root detection)
   - **Yii2** (Vendor path validation via `yii` root detection)
